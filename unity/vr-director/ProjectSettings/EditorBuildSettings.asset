@@ -5,10 +5,16 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
+  - enabled: 1
+    path: Assets/Scenes/SplatViewer.unity
+    guid: 627f97b7ba931401e87bcce10f3c2f81
+  - enabled: 0
+    path: Assets/Scenes/PointCloudViewer.unity
+    guid: a6567ea048870496fa61a00e524a32f5
   - enabled: 0
     path: Assets/Scenes/SampleScene.unity
     guid: 99c9720ab356a0642a771bea13969a05
-  - enabled: 1
+  - enabled: 0
     path: Assets/HelloCube.unity
     guid: e31767809802a49dbb818957f65a689f
   m_configObjects:

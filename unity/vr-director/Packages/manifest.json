@@ -19,6 +19,7 @@
     "com.unity.visualscripting": "1.9.12",
     "com.unity.xr.androidxr-openxr": "1.1.0",
     "com.unity.xr.openxr": "1.16.1",
+    "org.nesnausk.gaussian-splatting": "https://github.com/arghyasur1991/UnityGaussianSplatting.git?path=/package#da5b0579db99f0aaaa8fe2713e11dedb618bf0a1",
     "org.mixedrealitytoolkit.core": "file:MixedReality/org.mixedrealitytoolkit.core-4.0.0-pre.3.tgz",
     "org.mixedrealitytoolkit.input": "file:MixedReality/org.mixedrealitytoolkit.input-4.0.0-pre.2.tgz",
     "org.mixedrealitytoolkit.spatialmanipulation": "file:MixedReality/org.mixedrealitytoolkit.spatialmanipulation-4.0.0-pre.2.tgz",

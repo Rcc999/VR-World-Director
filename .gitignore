@@ -3,6 +3,11 @@ checkpoints/
 *.pth
 *.safetensors
 server/outputs/
+server/tools/
+server/target/
+# Raw capture videos: large, shared outside git (the processed scenes are in Unity Assets)
+data/**/*.[Mm][Oo][Vv]
+data/**/*.[Mm][Pp]4
 output/
 
 # Python

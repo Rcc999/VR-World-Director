@@ -483,6 +483,17 @@
         "com.unity.xr.interaction.toolkit": "3.0.4"
       }
     },
+    "org.nesnausk.gaussian-splatting": {
+      "version": "https://github.com/arghyasur1991/UnityGaussianSplatting.git?path=/package#da5b0579db99f0aaaa8fe2713e11dedb618bf0a1",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {
+        "com.unity.burst": "1.8.8",
+        "com.unity.collections": "2.1.4",
+        "com.unity.mathematics": "1.2.6"
+      },
+      "hash": "da5b0579db99f0aaaa8fe2713e11dedb618bf0a1"
+    },
     "com.unity.modules.accessibility": {
       "version": "1.0.0",
       "depth": 0,

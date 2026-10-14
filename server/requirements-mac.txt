@@ -1,0 +1,7 @@
+# Local (Mac) tools: photo prep + Depth Anything stand-in. Puffin-World itself
+# runs on a CUDA machine with third_party/Puffin/Puffin-World/requirements.txt.
+#   python3.12 -m venv .venv && .venv/bin/pip install -r requirements-mac.txt
+torch
+transformers
+pillow
+numpy
