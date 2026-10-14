@@ -1,0 +1,28 @@
+# Model weights and generated scenes (large, regenerable)
+checkpoints/
+*.pth
+*.safetensors
+server/outputs/
+output/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Unity (project lives in unity/)
+unity/**/[Ll]ibrary/
+unity/**/[Tt]emp/
+unity/**/[Oo]bj/
+unity/**/[Bb]uild/
+unity/**/[Bb]uilds/
+unity/**/[Ll]ogs/
+unity/**/[Uu]ser[Ss]ettings/
+unity/**/*.apk
+unity/**/*_BurstDebugInformation_DoNotShip/
+unity/**/*_BackUpThisFolder_ButDontShipItWithYourGame/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
