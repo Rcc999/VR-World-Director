@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates git ffmpeg libgl1 libglib2.0-0 libegl1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements-euler.txt container/install.sh /tmp/env/
-RUN cd /tmp/env && ./install.sh && rm -rf /tmp/env
+COPY requirements-euler.txt container/install.sh /opt/env/
+RUN cd /opt/env && ./install.sh && rm -rf /opt/env
 
 ENV PATH=/opt/venv/bin:$PATH \
     PUFFIN_BASE_DIR=/weights/base \

@@ -7,7 +7,7 @@
 #SBATCH --gpus=nvidia_rtx_pro_6000:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=16G
-#SBATCH --time=4:00:00
+#SBATCH --time=1:00:00
 #SBATCH --output=outputs/slurm/%x-%j.out
 
 MODEL=${1:-pro}
