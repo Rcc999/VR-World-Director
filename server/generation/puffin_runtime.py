@@ -12,6 +12,7 @@ the Unity frame.
 import math
 import os
 import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,12 +27,48 @@ CKPT_DIR = os.environ.get(
     'PUFFIN_CKPT_DIR', os.path.expandvars('$SCRATCH/puffin_ckpt'))
 UPSTREAM_BASE_PREFIX = '/mnt/afs_100t/NTU_slab/kliao/models'
 
+# JIT caches (Triton kernels, torch extensions) default to $HOME, which is
+# read-only inside the Apptainer image on Euler. Keep them in the repo's
+# git-ignored outputs/, which is mounted writable in every runtime.
+_CACHE = REPO_ROOT / 'server' / 'outputs' / '.cache'
+for _var, _sub in (('TRITON_CACHE_DIR', 'triton'),
+                   ('TORCH_EXTENSIONS_DIR', 'torch_extensions'),
+                   ('XDG_CACHE_HOME', 'xdg'),
+                   ('MPLCONFIGDIR', 'matplotlib')):
+    os.environ.setdefault(_var, str(_CACHE / _sub))
+
 # Upstream configs read relative paths (configs/scheduler_cus) and import
 # `configs.*` / `src.*` / `scripts.*`, so everything runs from PUFFIN_ROOT.
 os.chdir(PUFFIN_ROOT)
 sys.path.insert(0, str(PUFFIN_ROOT))
 
 import torch  # noqa: E402
+import transformers.utils as _tu  # noqa: E402
+
+# Same shims upstream applies in src/models/puffin/vlm.py, needed before the
+# xtuner imports below: transformers 5.x dropped is_safetensors_available
+# (xtuner 0.1.23 imports it), and the .pth checkpoints need full unpickling.
+if not hasattr(_tu, 'is_safetensors_available'):
+    _tu.is_safetensors_available = lambda: True
+_torch_load = torch.load
+torch.load = lambda *a, **kw: _torch_load(*a, **{'weights_only': False, **kw})
+
+
+# Upstream dataset modules import petrel_client / aoss_client (SenseTime-
+# internal object storage, not on PyPI) unconditionally. We only read local
+# files, so stubs that fail loudly if anything actually uses them are enough.
+class _NoObjectStorageClient:
+    def __init__(self, *a, **kw):
+        raise RuntimeError('object-storage clients are not available; use local paths')
+
+
+for _name in ('petrel_client', 'aoss_client'):
+    _pkg = types.ModuleType(_name)
+    _pkg.client = types.ModuleType(f'{_name}.client')
+    _pkg.client.Client = _NoObjectStorageClient
+    sys.modules.setdefault(_name, _pkg)
+    sys.modules.setdefault(f'{_name}.client', _pkg.client)
+
 from einops import rearrange  # noqa: E402
 from mmengine.config import Config  # noqa: E402
 from PIL import Image  # noqa: E402
