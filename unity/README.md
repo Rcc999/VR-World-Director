@@ -5,7 +5,7 @@ built for the **Samsung Galaxy XR** (standalone Android build). Open that folder
 
 - MRTK3 packages are vendored as tarballs in `vr-director/Packages/MixedReality/`.
 - Gaussian splats are rendered with a fork of aras-p's Unity Gaussian Splatting that adds Quest 3
-  stereo support (`arghyasur1991/UnityGaussianSplatting`, pinned in `Packages/manifest.json`).
+  stereo support (`arghyasur1991/UnityGaussianSplatting` at da5b057, embedded and patched, see below).
 - Binary assets (`.ply`, splat `.bytes`, images, video) go through Git LFS. Run `git lfs install` once.
 - The first open rebuilds `Library/`, which takes a few minutes. Put APKs in `vr-director/Builds/` (git-ignored).
 
@@ -40,7 +40,25 @@ full VR (no passthrough, black background) and make the new scene the only one i
 
 ## Controls in the headset (hands, no controllers)
 
-- Hold a **left pinch**: move forward where you look. **Right pinch**: move backward.
-- Hold **both pinches** ~1.5 s: back to the start. Turn with your body.
-- Pinch with the palm facing away: palm toward you opens the system menu.
-- Controllers also work if present: left stick moves, right stick turns, B/Y resets.
+| Action | Gesture |
+|---|---|
+| Move | Pinch in empty space and pull |
+| Turn | Pinch with both hands and rotate them |
+| Teleport | Point at the floor, hold a still pinch until the ring appears, release |
+| Menu | Turn your left palm toward you; poke buttons with your right index |
+| New camera | Menu → *New camera*: it sits in your right hand with a live preview; aim, then pinch to place |
+| Edit a camera | Pinch it, move or rotate your hand (it never rolls, so the horizon stays level) |
+| Undo / Clear all / Reset position | Menu buttons |
+| Save | Menu → *Save*: cameras go to `camera_path.json` on the headset and load back at start |
+| Speed | Menu → *Speed*: Slow / Medium / Fast = 0.25 / 0.5 / 1 m/s along the path |
+| Generate | Menu → *Generate*: renders the shot along the path (1280×720, 30 fps PNGs + `trajectory.json`). Meanwhile you wait in an empty black space with only the progress screen, and nothing can be touched. Then the room comes back and the shot replays on a screen; press again to close |
+
+The video shows only the room: the room is on the **Scene** layer, and the shot and preview cameras render only that layer (no hands, menu, screen, camera models or path).
+
+Cameras are numbered in placement order and joined by the path line.
+Code: `Runtime/VRLocomotion.cs`, `HandInput.cs`, `CameraPathTool.cs`, `PathCamera.cs`, `ShotRenderer.cs`, `PathMenu.cs`.
+To get a shot onto the Mac as MP4: `server/shots/pull_shot.sh` (see `server/README.md`).
+
+The splat package is embedded in `vr-director/Packages/org.nesnausk.gaussian-splatting/` with two
+patches (marked `VR Director patch`): extra cameras get correct splat sizes on the headset, and splats
+respect a camera's culling mask (so the headset can hide them while the shot camera renders them).

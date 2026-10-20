@@ -70,6 +70,7 @@ namespace VRDirector.Editor
             gs.m_ShaderDebugPoints = Load<Shader>("Shaders/GaussianDebugRenderPoints.shader");
             gs.m_ShaderDebugBoxes = Load<Shader>("Shaders/GaussianDebugRenderBoxes.shader");
             gs.m_CSSplatUtilities = Load<ComputeShader>("Shaders/SplatUtilities.compute");
+            CameraToolsBuilder.MarkAsScene(go);
 
             PointCloudSceneBuilder.SaveAsOnlyBuildScene(scene, ViewerScene);
             Selection.activeGameObject = go;

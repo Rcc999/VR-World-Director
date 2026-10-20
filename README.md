@@ -15,7 +15,28 @@ a large NVIDIA GPU that we do not have yet, so for now we test the rest of the p
 | **Splat as Gaussians** | ~1 min of video | **Full 360° room, realistic** | `server/splat_gaussians/` |
 
 The two splat approaches share capture → camera poses (COLMAP) → training (Brush):
-`server/splat_train/`. In VR you can walk around with hand pinches (no controllers needed).
+`server/splat_train/`.
+
+## The VR camera director (proposal Steps 2–3, on the 3DGS room)
+
+Works on the Galaxy XR with hands only (no controllers):
+
+1. **Move** in the room: pinch empty space and pull, two-hand pinch to turn, or point at the
+   floor and hold a pinch to teleport.
+2. **Place cameras** from the left-palm menu: *New camera* puts a camera in your right hand with a
+   live preview of its view on its back; aim and pinch to place it. Cameras are numbered 1, 2, 3…
+   and joined by a smooth path. Pinch a camera to move or rotate it; it never rolls, so the
+   horizon stays level.
+3. **Save** the cameras (`camera_path.json` on the headset, reloaded at start).
+4. **Generate**: pick *Speed* (Slow / Medium / Fast), then *Generate*. A hidden camera flies along
+   the path and renders the splat (1280×720, 30 fps PNGs + `trajectory.json` with every frame's
+   pose); the shot then replays on a screen in VR.
+5. **Get the video**: plug in the headset and run `server/shots/pull_shot.sh` → MP4 on the Mac.
+
+With the 3DGS room, "generate" means *rendering* the existing scene along the path. Later, the same
+path (`trajectory.json`) is what a world model like Puffin-World would take to generate new views.
+
+Details: gestures and code in `unity/README.md`, the pull script in `server/README.md`.
 
 ## Run it end to end (realistic splat, on a Mac)
 
@@ -30,6 +51,7 @@ The two splat approaches share capture → camera poses (COLMAP) → training (B
    allow the computer, then in Unity *File → Build Profiles → Android → Build and Run* (save the
    APK in `unity/vr-director/Builds/`). The app opens on the headset; see the hand controls in
    `unity/README.md`.
+5. **Make a shot**: place cameras, *Generate*, then `server/shots/pull_shot.sh` (section above).
 
 The room in `data/room/` is already processed into `unity/vr-director/Assets/`, so to just try
 it in the headset you can skip steps 1–3 except installing Unity.

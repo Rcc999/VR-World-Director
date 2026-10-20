@@ -17,6 +17,7 @@ Run every command **from `server/`** (scripts are modules). Outputs go to `serve
 | `splat_train/` | Videos → frames → camera poses (COLMAP) → Gaussian splat (Brush). Shared by the next two. |
 | `splat_points/` | Splat → colored point cloud. Light, but looks pixelated: each splat becomes an opaque square. |
 | `splat_gaussians/` | Splat → pruned splat (300k) + Unity transform, rendered as real Gaussians. Realistic. |
+| `shots/` | Pulls a shot rendered on the headset and makes an MP4. |
 
 ## Depth (one photo)
 
@@ -47,5 +48,13 @@ splat_train/train_brush.sh outputs/room_splat                    # splat, ~25 mi
 ```
 
 Then follow `unity/README.md` to bring the result into the headset.
+
+## Shots from the headset
+
+After *Generate* in VR, plug the headset in and run (from `server/`):
+
+```bash
+shots/pull_shot.sh        # latest shot -> outputs/shots/<date>/<date>.mp4 (+ frames, trajectory.json)
+```
 
 Tests: `.venv/bin/python -m common.test_pointcloud`

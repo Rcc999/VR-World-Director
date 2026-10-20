@@ -1,51 +1,83 @@
+using System.Collections.Generic;
 using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 namespace VRDirector
 {
     /// <summary>
-    /// Moves the XR rig through a scene that is bigger than the play space.
+    /// Moves the XR rig through a scene that is bigger than the play space, with hands
+    /// only (Galaxy XR). A pinch only moves you when it starts in empty space: pinches
+    /// on a button or a camera belong to that object.
     ///
-    /// Hands (Galaxy XR without controllers): hold a left-hand pinch to glide
-    /// forward where you look, a right-hand pinch to glide backward, and hold both
-    /// pinches for a moment to return to the spawn point. Turn by turning your body.
-    /// Controllers, if present: left stick walks (relative to where you look),
-    /// right stick left/right snap-turns, B / Y returns to the spawn point.
+    /// - Drag: pinch and pull, like pulling yourself along a rope.
+    /// - Turn: pinch with both hands and rotate them around each other.
+    /// - Teleport: point at the floor and hold a pinch still for a moment; a ring
+    ///   shows the target, release to jump there.
     ///
-    /// Movement stays horizontal: the rig keeps its height, so the floor stays
-    /// under your real floor.
+    /// Controllers, if present: left stick walks, right stick snap-turns, B / Y resets.
+    /// Movement stays horizontal, so the floor stays under your real floor.
     /// </summary>
     [RequireComponent(typeof(XROrigin))]
     public class VRLocomotion : MonoBehaviour
     {
-        [Tooltip("Walking speed in m/s.")]
-        public float speed = 1.0f;
+        [Tooltip("World meters moved per meter of hand motion while dragging.")]
+        public float dragGain = 1.5f;
 
-        [Tooltip("Degrees per snap turn.")]
+        [Tooltip("Hand motion (m) that turns a fresh pinch into a drag.")]
+        public float dragStartDistance = 0.03f;
+
+        [Tooltip("Seconds a still pinch waits before it becomes a teleport.")]
+        public float teleportHoldSeconds = 0.35f;
+
+        [Tooltip("Farthest teleport target (m).")]
+        public float teleportMaxDistance = 12f;
+
+        [Tooltip("Material for the teleport ray and ring.")]
+        public Material lineMaterial;
+
+        [Header("Controllers (optional)")]
+        public float stickSpeed = 1.0f;
         public float snapTurnDegrees = 30f;
 
-        [Tooltip("Pinch strength (0..1) that counts as a held pinch.")]
-        public float pinchThreshold = 0.8f;
+        /// <summary>Hands another tool is using (e.g. holding a camera); they do not move the rig.</summary>
+        public readonly HashSet<Hand> blockedHands = new();
 
-        [Tooltip("Seconds both pinches must be held to return to the spawn point.")]
-        public float resetHoldSeconds = 1.5f;
+        enum Mode { None, Undecided, Drag, Teleport }
+
+        class HandState
+        {
+            public HandInput input;
+            public List<XRBaseInteractor> interactors;
+            public Mode mode;
+            public float startTime;
+            public Vector3 startPos, lastPos; // tracking space
+        }
 
         XROrigin origin;
         Pose spawn;
+        readonly HandState[] hands = { new(), new() };
+        Vector3 lastMid, lastSpan;
+        bool twoHanded;
+        LineRenderer teleportRay, teleportRing;
         bool turnReady = true;
-        float bothPinchedFor;
-        InputAction move, turn, pinchForward, pinchBack, reset;
+        InputAction move, turn, reset;
 
         void Awake()
         {
             origin = GetComponent<XROrigin>();
             spawn = new Pose(transform.position, transform.rotation);
+            for (int h = 0; h < 2; h++)
+            {
+                hands[h].input = new HandInput((Hand)h);
+                hands[h].interactors = HandInput.InteractorsOf(origin, (Hand)h);
+            }
+            teleportRay = MakeLine("Teleport Ray", 0.005f, false);
+            teleportRing = MakeLine("Teleport Ring", 0.01f, true);
 
             move = new InputAction("Move", InputActionType.Value, "<XRController>{LeftHand}/{Primary2DAxis}");
             turn = new InputAction("Turn", InputActionType.Value, "<XRController>{RightHand}/{Primary2DAxis}");
-            pinchForward = new InputAction("Pinch Forward", InputActionType.Value, "<HandInteraction>{LeftHand}/pinchValue");
-            pinchBack = new InputAction("Pinch Back", InputActionType.Value, "<HandInteraction>{RightHand}/pinchValue");
             reset = new InputAction("Reset", InputActionType.Button);
             reset.AddBinding("<XRController>{RightHand}/{SecondaryButton}");
             reset.AddBinding("<XRController>{LeftHand}/{SecondaryButton}");
@@ -53,47 +85,166 @@ namespace VRDirector
 
         void OnEnable()
         {
-            foreach (var a in new[] { move, turn, pinchForward, pinchBack, reset }) a.Enable();
+            foreach (var h in hands) h.input.Enable();
+            move.Enable(); turn.Enable(); reset.Enable();
         }
 
         void OnDisable()
         {
-            foreach (var a in new[] { move, turn, pinchForward, pinchBack, reset }) a.Disable();
+            foreach (var h in hands) h.input.Disable();
+            move.Disable(); turn.Disable(); reset.Disable();
+            ShowTeleport(false, default);
         }
+
+        public void ResetToSpawn() => transform.SetPositionAndRotation(spawn.position, spawn.rotation);
 
         void Update()
         {
+            for (int h = 0; h < 2; h++) UpdateHand(hands[h], (Hand)h);
+
+            bool leftOn = hands[0].mode != Mode.None, rightOn = hands[1].mode != Mode.None;
+            if (leftOn && rightOn) TwoHandTurn();
+            else
+            {
+                twoHanded = false;
+                foreach (var h in hands) OneHand(h);
+            }
+            Controllers();
+        }
+
+        void UpdateHand(HandState s, Hand hand)
+        {
+            s.input.Update();
+            if (s.input.PinchStarted && !blockedHands.Contains(hand) && !HandInput.IsBusy(s.interactors))
+            {
+                s.mode = Mode.Undecided;
+                s.startTime = Time.time;
+                s.startPos = s.lastPos = s.input.PinchPosition;
+            }
+            else if (!s.input.IsPinching && s.mode != Mode.None)
+            {
+                if (s.mode == Mode.Teleport && TeleportTarget(s, out var target)) TeleportTo(target);
+                if (s.mode == Mode.Teleport) ShowTeleport(false, default);
+                s.mode = Mode.None;
+            }
+        }
+
+        void OneHand(HandState s)
+        {
+            Vector3 p = s.input.PinchPosition;
+            if (s.mode == Mode.Undecided)
+            {
+                if (Vector3.Distance(p, s.startPos) > dragStartDistance)
+                {
+                    s.mode = Mode.Drag;
+                    s.lastPos = s.startPos;
+                }
+                else if (Time.time - s.startTime > teleportHoldSeconds)
+                {
+                    s.mode = TeleportTarget(s, out _) ? Mode.Teleport : Mode.Drag;
+                }
+            }
+            if (s.mode == Mode.Drag)
+            {
+                // Hand in tracking space moved by d: move the rig the other way, so the
+                // world appears to follow the hand.
+                Vector3 d = HandInput.TrackingSpace(origin).TransformVector(p - s.lastPos);
+                transform.position -= Vector3.ProjectOnPlane(d, transform.up) * dragGain;
+                s.lastPos = p;
+            }
+            else if (s.mode == Mode.Teleport)
+            {
+                bool ok = TeleportTarget(s, out var target);
+                ShowTeleport(ok, target, s);
+            }
+        }
+
+        void TwoHandTurn()
+        {
+            Vector3 a = hands[0].input.PinchPosition, b = hands[1].input.PinchPosition;
+            Vector3 mid = (a + b) / 2, span = b - a;
+            ShowTeleport(false, default);
+            if (twoHanded)
+            {
+                var space = HandInput.TrackingSpace(origin);
+                Vector3 d = space.TransformVector(mid - lastMid);
+                transform.position -= Vector3.ProjectOnPlane(d, transform.up) * dragGain;
+                float yaw = Vector3.SignedAngle(Vector3.ProjectOnPlane(span, Vector3.up),
+                                                Vector3.ProjectOnPlane(lastSpan, Vector3.up), Vector3.up);
+                origin.RotateAroundCameraUsingOriginUp(yaw); // hands turn clockwise -> world turns with them
+            }
+            foreach (var h in hands) h.mode = Mode.Drag; // a teleport cannot start mid-turn
+            lastMid = mid; lastSpan = span; twoHanded = true;
+            foreach (var h in hands) h.lastPos = h.input.PinchPosition;
+        }
+
+        bool TeleportTarget(HandState s, out Vector3 target)
+        {
+            var space = HandInput.TrackingSpace(origin);
+            var ray = new Ray(space.TransformPoint(s.input.AimPosition),
+                              space.TransformDirection(s.input.AimRotation * Vector3.forward));
+            var floor = new Plane(transform.up, transform.position);
+            target = default;
+            if (Vector3.Dot(ray.direction, transform.up) > -0.05f) return false; // not pointing down
+            if (!floor.Raycast(ray, out float dist) || dist > teleportMaxDistance) return false;
+            target = ray.GetPoint(dist);
+            return true;
+        }
+
+        void TeleportTo(Vector3 target)
+        {
+            Vector3 head = origin.Camera != null ? origin.Camera.transform.position : transform.position;
+            transform.position += Vector3.ProjectOnPlane(target - head, transform.up);
+        }
+
+        void ShowTeleport(bool on, Vector3 target, HandState s = null)
+        {
+            teleportRay.enabled = teleportRing.enabled = on;
+            if (!on) return;
+            var space = HandInput.TrackingSpace(origin);
+            teleportRay.SetPosition(0, space.TransformPoint(s.input.AimPosition));
+            teleportRay.SetPosition(1, target);
+            const int n = 32;
+            for (int i = 0; i < n; i++)
+            {
+                float a = i * Mathf.PI * 2 / n;
+                teleportRing.SetPosition(i, target + 0.25f * (Mathf.Cos(a) * transform.right + Mathf.Sin(a) * transform.forward)
+                                                   + 0.01f * transform.up);
+            }
+        }
+
+        LineRenderer MakeLine(string name, float width, bool loop)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(transform, false);
+            var lr = go.AddComponent<LineRenderer>();
+            lr.useWorldSpace = true;
+            lr.loop = loop;
+            lr.positionCount = loop ? 32 : 2;
+            lr.widthMultiplier = width;
+            lr.sharedMaterial = lineMaterial;
+            lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            lr.enabled = false;
+            return lr;
+        }
+
+        void Controllers()
+        {
             var head = origin.Camera != null ? origin.Camera.transform : transform;
-            Vector3 up = transform.up;
-            Vector3 forward = Vector3.ProjectOnPlane(head.forward, up).normalized;
-            Vector3 right = Vector3.Cross(up, forward);
-
+            Vector3 forward = Vector3.ProjectOnPlane(head.forward, transform.up).normalized;
+            Vector3 right = Vector3.Cross(transform.up, forward);
             Vector2 stick = move.ReadValue<Vector2>();
-            bool pinchingLeft = pinchForward.ReadValue<float>() >= pinchThreshold;
-            bool pinchingRight = pinchBack.ReadValue<float>() >= pinchThreshold;
-            float glide = (pinchingLeft ? 1f : 0f) - (pinchingRight ? 1f : 0f); // both pinched: stand still
-            Vector3 direction = forward * (stick.y + glide) + right * stick.x;
-            if (direction.sqrMagnitude > 1f) direction.Normalize();
-            transform.position += direction * (speed * Time.deltaTime);
+            transform.position += (forward * stick.y + right * stick.x) * (stickSpeed * Time.deltaTime);
 
-            // Snap turn once per stick flick; the stick must come back to center.
             float x = turn.ReadValue<Vector2>().x;
             if (turnReady && Mathf.Abs(x) > 0.7f)
             {
                 origin.RotateAroundCameraUsingOriginUp(Mathf.Sign(x) * snapTurnDegrees);
                 turnReady = false;
             }
-            else if (Mathf.Abs(x) < 0.3f)
-            {
-                turnReady = true;
-            }
+            else if (Mathf.Abs(x) < 0.3f) turnReady = true;
 
-            bothPinchedFor = pinchingLeft && pinchingRight ? bothPinchedFor + Time.deltaTime : 0f;
-            if (reset.WasPressedThisFrame() || bothPinchedFor >= resetHoldSeconds)
-            {
-                transform.SetPositionAndRotation(spawn.position, spawn.rotation);
-                bothPinchedFor = float.NegativeInfinity; // once per hold
-            }
+            if (reset.WasPressedThisFrame()) ResetToSpawn();
         }
     }
 }

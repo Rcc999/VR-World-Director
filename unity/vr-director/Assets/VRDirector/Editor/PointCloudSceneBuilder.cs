@@ -42,6 +42,7 @@ namespace VRDirector.Editor
             var scene = OpenViewerTemplate();
             var instance = (GameObject)PrefabUtility.InstantiatePrefab(cloud, scene);
             instance.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            CameraToolsBuilder.MarkAsScene(instance);
 
             SaveAsOnlyBuildScene(scene, ViewerScene);
             Selection.activeGameObject = instance;
@@ -50,8 +51,8 @@ namespace VRDirector.Editor
 
         /// <summary>
         /// Opens the HelloCube template without its cube, with the XR rig at the
-        /// origin (floor tracking, locomotion, opaque black background) and the
-        /// AR Session off.
+        /// origin (floor tracking, locomotion, opaque black background), the
+        /// AR Session off, and the camera keyframe tools + left-palm menu.
         /// </summary>
         internal static Scene OpenViewerTemplate()
         {
@@ -83,6 +84,7 @@ namespace VRDirector.Editor
             }
             foreach (var root in scene.GetRootGameObjects().Where(g => g.name == "AR Session"))
                 root.SetActive(false);
+            CameraToolsBuilder.Add(scene, origin);
             return scene;
         }
 
