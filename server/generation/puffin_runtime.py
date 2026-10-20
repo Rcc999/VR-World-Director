@@ -71,7 +71,7 @@ for _name in ('petrel_client', 'aoss_client'):
 
 from einops import rearrange  # noqa: E402
 from mmengine.config import Config  # noqa: E402
-from PIL import Image  # noqa: E402
+from PIL import Image, ImageOps  # noqa: E402
 from xtuner.model.utils import guess_load_checkpoint  # noqa: E402
 from xtuner.registry import BUILDER  # noqa: E402
 
@@ -125,7 +125,9 @@ def load_model(name='pro', checkpoint=None, device='cuda', geometry=True):
 
 def load_seed_image(path, res=640):
     """Center-crop to square, resize to res, [-1, 1] CHW tensor."""
-    img = Image.open(path).convert('RGB')
+    # Phone photos are stored sideways with an EXIF orientation tag; PIL ignores
+    # it unless asked, which feeds the model a 90°-rolled view.
+    img = ImageOps.exif_transpose(Image.open(path)).convert('RGB')
     w, h = img.size
     s = min(w, h)
     img = img.crop(((w - s) // 2, (h - s) // 2, (w + s) // 2, (h + s) // 2))
