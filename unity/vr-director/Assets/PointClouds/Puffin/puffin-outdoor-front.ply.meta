@@ -1,0 +1,13 @@
+fileFormatVersion: 2
+guid: 471be60d4f534c5aa9b2e9b955366e26
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+  script: {fileID: 11500000, guid: 1a9c103c404ae4926b5bdef4806cd032, type: 3}
+  maxPoints: 1000000
+  sizePerMeter: 0.003
+  captureOrigin: {x: 0, y: 1.5, z: 0}
