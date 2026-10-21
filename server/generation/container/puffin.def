@@ -1,0 +1,20 @@
+# Puffin-World generation server, Apptainer image for Euler. Same environment
+# as the Dockerfile (both run install.sh). Build from server/generation/:
+#   apptainer build --fakeroot $SCRATCH/vrwd-puffin.sif container/puffin.def
+Bootstrap: docker
+From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
+
+%files
+    requirements-euler.txt /opt/env/requirements-euler.txt
+    container/install.sh /opt/env/install.sh
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates git ffmpeg libgl1 libglib2.0-0 libegl1
+    rm -rf /var/lib/apt/lists/*
+    cd /opt/env && ./install.sh && rm -rf /opt/env
+
+%environment
+    export PATH=/opt/venv/bin:$PATH
+    export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
