@@ -1,19 +1,30 @@
 """GPU check that streaming.stream() matches upstream's chunked generation.
 
-Generates a 2-chunk pan with depth three ways from the same seed:
-  upstream   run_chunked_generation (via puffin_runtime.generate)
-  stream     streaming.stream() in one call
-  resumed    streaming.stream() as two calls, the second resuming the state
-and reports the largest frame / depth differences (GPU nondeterminism leaves
-a little noise), time to the first chunk, and a padded 3-view run.
+Generates a 2-chunk pan with depth from the same seed four ways:
+  upstream, upstream2   run_chunked_generation twice: GPU nondeterminism
+                        between identical runs is the noise floor
+  stream                streaming.stream() in one call
+  resumed               streaming.stream() as two calls, resuming the state
+Per-view PSNR and depth difference against `upstream` are compared with the
+noise floor; a contact sheet (rows: upstream / upstream2 / stream / resumed)
+goes to outputs/check_stream.png. Also times the first chunk and runs a
+padded 3-view path.
 
     python -m generation.check_stream --image /seeds/test-room0.JPG
 """
 import argparse
 import os
 import time
+from pathlib import Path
 
 import numpy as np
+
+SERVER_DIR = Path(__file__).resolve().parents[1]
+
+
+def psnr(a, b):
+    mse = np.mean((a.astype(np.float64) - b.astype(np.float64)) ** 2)
+    return 99.0 if mse == 0 else 10 * np.log10(255.0 ** 2 / mse)
 
 
 def main():
@@ -25,6 +36,7 @@ def main():
     image = os.path.abspath(args.image)
 
     import torch
+    from PIL import Image
     from generation import puffin_runtime as pr
     from generation import scenes, streaming
 
@@ -33,19 +45,17 @@ def main():
     _, cam = pr.understand(model, pil)
     K = pr.intrinsics_from_vfov(cam[2])
     poses = scenes.pan_poses(15, 5.0, scenes.gravity_up(cam[1]))   # seed + 14 = 2 chunks
-    gen = lambda: torch.Generator(device=model.device).manual_seed(0)
+    to_u8 = lambda f: ((f.clamp(-1, 1) + 1) * 127.5).round().byte().permute(1, 2, 0).numpy()
 
-    t0 = time.perf_counter()
-    up = pr.generate(model, seed_img, poses, K, cam, num_steps=args.num_steps, seed=0)
-    t_up = time.perf_counter() - t0
-    up_frames = [((f.clamp(-1, 1) + 1) * 127.5).round().byte().permute(1, 2, 0).numpy()
-                 for f in up['gen_images_tensor'][0].float().cpu()]
-    up_depths = [np.asarray(d.float().cpu()) for d in up['depth_samples'][0]]
+    def upstream():
+        r = pr.generate(model, seed_img, poses, K, cam, num_steps=args.num_steps, seed=0)
+        return ([to_u8(f) for f in r['gen_images_tensor'][0].float().cpu()],
+                [np.asarray(d.float().cpu()) for d in r['depth_samples'][0]])
 
     def run(splits):
-        state, g = streaming.seed_state(seed_img), gen()
-        frames, depths, first = [], [], None
-        t0 = time.perf_counter()
+        state = streaming.seed_state(seed_img)
+        g = torch.Generator(device=model.device).manual_seed(0)
+        frames, depths, first, t0 = [], [], None, time.perf_counter()
         for part in splits:
             for c in streaming.stream(model, state, part, K, cam,
                                       num_steps=args.num_steps, generator=g):
@@ -54,30 +64,42 @@ def main():
                     depths.append(c.anchor_depth)
                 frames += c.frames
                 depths += c.depths
-        return frames, depths, first, time.perf_counter() - t0
+        print(f"  first chunk after {first:.1f} s, total {time.perf_counter() - t0:.1f} s")
+        return frames, depths
 
-    one = run([poses[1:]])
-    two = run([poses[1:8], poses[8:]])
+    runs = {'upstream': upstream(), 'upstream2': upstream(),
+            'stream': run([poses[1:]]), 'resumed': run([poses[1:8], poses[8:]])}
+    ref_f, ref_d = runs['upstream']
 
-    def diff(name, frames, depths):
-        f = max(np.abs(a.astype(int) - b.astype(int)).max() for a, b in zip(frames, up_frames))
-        d = max(float(np.median(np.abs(a - b)[b > 0] / b[b > 0])) for a, b in zip(depths, up_depths))
-        n = (len(frames), len(depths))
-        ok = n == (len(up_frames), len(up_depths)) and f <= 8 and d < 0.02
-        print(f"{name:8s} views {n} vs {(len(up_frames), len(up_depths))} | "
-              f"max frame diff {f}/255 | worst median depth diff {d:.2%} | "
-              f"{'OK' if ok else 'MISMATCH'}", flush=True)
-        return ok
+    def compare(name):
+        frames, depths = runs[name]
+        if (len(frames), len(depths)) != (len(ref_f), len(ref_d)):
+            print(f"{name:9s} view count {len(frames)}/{len(depths)} vs {len(ref_f)}/{len(ref_d)}")
+            return None
+        ps = [psnr(a, b) for a, b in zip(frames, ref_f)]
+        dd = [float(np.median(np.abs(a - b)[b > 0] / b[b > 0])) for a, b in zip(depths, ref_d)]
+        print(f"{name:9s} PSNR vs upstream: mean {np.mean(ps):.1f} dB, worst {min(ps):.1f} dB "
+              f"(chunk 1 {np.mean(ps[:7]):.1f}, chunk 2 {np.mean(ps[7:]):.1f}) | "
+              f"depth diff median {np.median(dd):.2%}, worst {max(dd):.2%}", flush=True)
+        return min(ps), max(dd)
 
-    print(f"upstream total {t_up:.1f} s")
-    print(f"stream   first chunk {one[2]:.1f} s, total {one[3]:.1f} s")
-    ok = diff('stream', one[0], one[1]) & diff('resumed', two[0], two[1])
+    floor = compare('upstream2')
+    ok = floor is not None
+    for name in ('stream', 'resumed'):
+        r = compare(name)
+        # Pass if no worse than the run-to-run noise, with a 3 dB / 1 pt margin.
+        ok &= r is not None and r[0] >= floor[0] - 3.0 and r[1] <= floor[1] + 0.01
+
+    sheet = np.concatenate([np.concatenate(runs[k][0][::2], axis=1)
+                            for k in ('upstream', 'upstream2', 'stream', 'resumed')], axis=0)
+    Image.fromarray(sheet).resize((sheet.shape[1] // 4, sheet.shape[0] // 4)) \
+        .save(SERVER_DIR / 'outputs' / 'check_stream.png')
 
     state = streaming.seed_state(seed_img)
     short = list(streaming.stream(model, state, poses[1:4], K, cam,
-                                  num_steps=args.num_steps, generator=gen()))
+                                  num_steps=args.num_steps))
     n = sum(len(c.frames) for c in short)
-    print(f"padded   3 poses -> {n} frames, state at view {state.views_done - 1}")
+    print(f"padded    3 poses -> {n} frames, state at view {state.views_done - 1}")
     ok &= n == 3 and state.views_done == 4
     print('ok' if ok else 'FAILED')
 
