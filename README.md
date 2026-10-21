@@ -21,22 +21,25 @@ The two splat approaches share capture → camera poses (COLMAP) → training (B
 
 Works on the Galaxy XR with hands only (no controllers):
 
-1. **Move** in the room: pinch empty space and pull, two-hand pinch to turn, or point at the
-   floor and hold a pinch to teleport.
+1. **Move** in the room: pinch empty space and pull, two-hand pinch to turn. A help panel with
+   all gestures opens at start (and from *Help* in the menu).
 2. **Place cameras** from the left-palm menu: *New camera* puts a camera in your right hand with a
    live preview of its view on its back; aim and pinch to place it. Cameras are numbered 1, 2, 3…
    and joined by a smooth path. Pinch a camera to move or rotate it; it never rolls, so the
    horizon stays level.
 3. **Save** the cameras (`camera_path.json` on the headset, reloaded at start).
 4. **Generate**: pick *Speed* (Slow / Medium / Fast), then *Generate*. A hidden camera flies along
-   the path and renders the splat (1280×720, 30 fps PNGs + `trajectory.json` with every frame's
-   pose); the shot then replays on a screen in VR.
-5. **Get the video**: plug in the headset and run `server/shots/pull_shot.sh` → MP4 on the Mac.
+   the path and renders the splat into a new shot, named shot1, shot2… (1280×720, 30 fps PNGs +
+   `shot.json` with every frame's
+   pose); then you are back at the start of the scene; the *Shots* panel lists
+   your shots: *Watch* (screen), *Ride* (you move along the path), *Edit* (its cameras come back;
+   Generate makes a new shot and keeps the old), *Rename*, *Delete*.
+5. **Get the video**: plug in the headset and run `server/shots/pull_shot.sh [name]` → MP4 on the Mac.
 
 With the 3DGS room, "generate" means *rendering* the existing scene along the path. Later, the same
-path (`trajectory.json`) is what a world model like Puffin-World would take to generate new views.
+path (`shot.json`) is what a world model like Puffin-World would take to generate new views.
 
-Details: gestures and code in `unity/README.md`, the pull script in `server/README.md`.
+Details: gestures, code and the path math (Catmull-Rom, arc length, SLERP) in `unity/README.md`, the pull script in `server/README.md`.
 
 ## Run it end to end (realistic splat, on a Mac)
 

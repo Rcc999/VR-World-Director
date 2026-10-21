@@ -54,7 +54,9 @@ Then follow `unity/README.md` to bring the result into the headset.
 After *Generate* in VR, plug the headset in and run (from `server/`):
 
 ```bash
-shots/pull_shot.sh        # latest shot -> outputs/shots/<date>/<date>.mp4 (+ frames, trajectory.json)
+shots/pull_shot.sh            # latest shot -> outputs/shots/<name>/<name>.mp4 (+ frames, shot.json)
+shots/pull_shot.sh shot3      # a shot by its name (as in the headset's Shots panel)
+shots/pull_shot.sh --list     # shots on the headset
 ```
 
 Tests: `.venv/bin/python -m common.test_pointcloud`

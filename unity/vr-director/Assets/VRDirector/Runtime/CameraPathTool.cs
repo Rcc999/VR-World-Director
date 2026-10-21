@@ -119,13 +119,21 @@ namespace VRDirector
         {
             if (!File.Exists(SavePath)) return;
             var data = JsonUtility.FromJson<SavedPath>(File.ReadAllText(SavePath));
-            foreach (var c in data?.cameras ?? Array.Empty<SavedCamera>())
+            SetCameras(data?.cameras);
+            Debug.Log($"[VR Director] Loaded {cameras.Count} cameras from {SavePath}");
+        }
+
+        /// <summary>Replaces the placed cameras (e.g. with a shot's keyframes, to edit it).</summary>
+        public void SetCameras(IEnumerable<SavedCamera> keyframes)
+        {
+            Clear();
+            foreach (var c in keyframes ?? Array.Empty<SavedCamera>())
             {
                 var cam = PathCamera.Create(transform, bodyMaterial, lineMaterial, screenMaterial, font, previewSize);
                 cam.transform.SetPositionAndRotation(c.position, c.rotation);
+                cam.SetGrabbable(enabled);
                 cameras.Add(cam);
             }
-            Debug.Log($"[VR Director] Loaded {cameras.Count} cameras from {SavePath}");
         }
 
         /// <summary>Lock or unlock all camera editing (while a shot renders).</summary>

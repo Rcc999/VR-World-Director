@@ -18,10 +18,12 @@ namespace VRDirector
     ///
     /// <see cref="Generate"/> flies a hidden camera through the placed cameras
     /// (Catmull-Rom positions, slerped rotations, constant Slow / Medium / Fast speed), renders one frame
-    /// per app frame into a texture and saves it as PNG, plus trajectory.json, under
-    /// &lt;persistentDataPath&gt;/Shots/&lt;date&gt;/. A floating screen shows the
-    /// progress, then replays the shot in a loop. server/shots/pull_shot.sh copies
-    /// the latest shot to the Mac and makes an MP4.
+    /// per app frame into a texture and saves it as a new shot (PNG frames + shot.json,
+    /// see <see cref="ShotLibrary"/>). A floating screen shows the progress (a loading
+    /// screen); then you are back at the start position with your cameras.
+    /// A shot can be watched on a screen (<see cref="Watch"/>, its saved frames) or
+    /// ridden (<see cref="Ride"/>: your head follows its path).
+    /// server/shots/pull_shot.sh copies the latest shot to the Mac and makes an MP4.
     /// </summary>
     public class ShotRenderer : MonoBehaviour
     {
@@ -48,15 +50,18 @@ namespace VRDirector
         public void CycleSpeed() => speed = (Speed)(((int)speed + 1) % 3);
 
         public bool IsBusy => rendering;
-        public bool ScreenVisible => screen != null && screen.activeSelf;
+        public bool IsWatching => watch != null;
+        public bool IsRiding => ride != null;
 
         Camera shotCam;
         RenderTexture rt;
         GameObject screen;
+        Renderer screenRenderer;
+        Texture2D playTex;
         TextMeshPro status;
         bool rendering;
         List<Pose> frames;
-        Coroutine replay;
+        Coroutine ride, watch;
 
         void Awake()
         {
@@ -76,6 +81,7 @@ namespace VRDirector
             shotCam.backgroundColor = Color.black;
             shotCam.cullingMask = SceneLayers.SceneMask; // the room only: no hands, menus, cameras
             shotCam.enabled = false;
+            playTex = new Texture2D(resolution.x, resolution.y, TextureFormat.RGBA32, false) { name = "Shot Playback" };
             BuildScreen();
         }
 
@@ -88,32 +94,48 @@ namespace VRDirector
                 ShowScreen($"Place at least 2 cameras first");
                 return;
             }
-            if (replay != null) StopCoroutine(replay);
+            Stop();
             StartCoroutine(Render());
         }
 
-        public void HideScreen()
+        /// <summary>Plays a shot's saved frames on a screen in front of you.</summary>
+        public void Watch(ShotLibrary.Shot shot)
         {
-            if (rendering) return;
-            if (replay != null) StopCoroutine(replay);
-            replay = null;
-            shotCam.enabled = false;
-            screen.SetActive(false);
+            if (rendering || shot == null) return;
+            Stop();
+            if (!shot.HasFrames) { ShowScreen($"{shot.data.name} has no frames"); return; }
+            watch = StartCoroutine(WatchFrames(shot));
+        }
+
+        /// <summary>Rides a shot: your head follows its path.</summary>
+        public void Ride(ShotLibrary.Shot shot)
+        {
+            if (rendering || shot == null || shot.FrameCount < 2) return;
+            Stop();
+            ride = StartCoroutine(RidePath(shot.data));
+        }
+
+        /// <summary>Stops watching or riding.</summary>
+        public void Stop()
+        {
+            if (watch != null) { StopCoroutine(watch); watch = null; }
+            if (ride != null) { StopCoroutine(ride); EndRide(); }
+            if (!rendering) screen.SetActive(false);
         }
 
         IEnumerator Render()
         {
             rendering = true;
-            Isolate(true);
-            string dir = Path.Combine(Application.persistentDataPath, "Shots", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
-            Directory.CreateDirectory(dir);
-            File.WriteAllText(Path.Combine(dir, "trajectory.json"), TrajectoryJson());
+            Isolate(true, 0);
+            var shot = ShotLibrary.Create(NewShotData());
+            string dir = shot.dir;
 
             // Exact sort and full resolution for the shot; the headset view gets slower meanwhile.
             var splats = FindObjectsByType<GaussianSplatRenderer>(FindObjectsSortMode.None);
             var saved = splats.Select(s => (s.m_SortPasses, s.m_RenderScale)).ToArray();
             foreach (var s in splats) { s.m_SortPasses = 4; s.m_RenderScale = 1f; }
 
+            screenRenderer.material.mainTexture = rt; // the render in progress
             shotCam.enabled = true;
             int pending = 0;
             var writes = new List<Task>();
@@ -140,48 +162,113 @@ namespace VRDirector
             while (pending > 0) yield return null;
             while (writes.Any(w => !w.IsCompleted)) yield return null;
 
+            shotCam.enabled = false;
             for (int i = 0; i < splats.Length; i++) (splats[i].m_SortPasses, splats[i].m_RenderScale) = saved[i];
-            Isolate(false);
+            Isolate(false, 0);
             rendering = false;
-            Debug.Log($"[VR Director] Shot saved: {frames.Count} frames in {dir}");
-            SetStatus($"Saved {frames.Count} frames ({frames.Count / (float)fps:F1} s)\n{Path.GetFileName(dir)}");
-            replay = StartCoroutine(Replay());
+            Debug.Log($"[VR Director] {shot.data.name} saved: {frames.Count} frames in {dir}");
+            // The dark room was only a loading screen: back to the start of the scene, with
+            // your cameras. Watch or ride the result from the Shots panel.
+            if (locomotion != null) locomotion.ResetToSpawn();
+            screen.SetActive(false);
         }
 
         int headsetMask;
 
         /// <summary>
         /// While rendering, the person waits in an empty black space with only the
-        /// progress screen (the headset shows only the "UI" layer), and nothing can be
-        /// touched: menu hidden, cameras locked, no movement.
+        /// progress screen (the headset shows only the "UI" layer: extraLayers = 0) and
+        /// the menu hidden. While riding a shot, the room is visible too (extraLayers =
+        /// Scene) and the menu stays, to stop. Either way cameras are locked and hand
+        /// movement is off.
         /// </summary>
-        void Isolate(bool on)
+        void Isolate(bool on, int extraLayers)
         {
             var head = origin.Camera;
             if (on)
             {
                 headsetMask = head.cullingMask;
-                if (SceneLayers.Overlay >= 0) head.cullingMask = 1 << SceneLayers.Overlay;
+                if (SceneLayers.Overlay >= 0) head.cullingMask = (1 << SceneLayers.Overlay) | extraLayers;
             }
             else head.cullingMask = headsetMask;
-            if (menu != null) menu.SetActive(!on);
+            if (menu != null && extraLayers == 0) menu.SetActive(!on);
             tool.SetInteractive(!on);
             if (locomotion != null) locomotion.enabled = !on;
         }
 
-        /// <summary>Plays the shot on the screen in a loop (live render along the same path).</summary>
-        IEnumerator Replay()
+        /// <summary>
+        /// Moves the XR rig so your head follows the shot's path (its frame poses) at the
+        /// shot's fps: position exactly (height included), heading from the path's
+        /// left/right turns added to your own. Pitch stays with your head, for comfort.
+        /// Only the room and the menu are visible; at the end you are back at the start.
+        /// </summary>
+        IEnumerator RidePath(ShotLibrary.ShotData data)
         {
-            shotCam.enabled = true;
+            var f = data.frames;
+            float rate = data.fps > 0 ? data.fps : fps;
+            Isolate(true, SceneLayers.SceneMask);
+
+            origin.MatchOriginUpCameraForward(Vector3.up, Heading(f[0].rotation));
+            origin.MoveCameraToWorldLocation(f[0].position);
+            float lastYaw = Yaw(f[0].rotation), t0 = Time.time;
             while (true)
             {
-                foreach (var f in frames)
+                float x = (Time.time - t0) * rate;
+                int i = Mathf.FloorToInt(x);
+                if (i >= f.Length - 1) break;
+                float u = x - i;
+                float yaw = Yaw(Quaternion.Slerp(f[i].rotation, f[i + 1].rotation, u));
+                origin.RotateAroundCameraUsingOriginUp(Mathf.DeltaAngle(lastYaw, yaw));
+                lastYaw = yaw;
+                origin.MoveCameraToWorldLocation(Vector3.Lerp(f[i].position, f[i + 1].position, u));
+                yield return null;
+            }
+            EndRide();
+        }
+
+        /// <summary>
+        /// Plays a saved shot's PNG frames on the screen in a loop, at the shot's fps.
+        /// Frames are read from disk in the background one ahead; if decoding falls
+        /// behind, frames are skipped so the duration stays right.
+        /// </summary>
+        IEnumerator WatchFrames(ShotLibrary.Shot shot)
+        {
+            var files = Directory.GetFiles(shot.dir, "frame_*.png").OrderBy(f => f).ToArray();
+            screenRenderer.material.mainTexture = playTex;
+            screen.SetActive(false); // reopen in front of you
+            ShowScreen($"{shot.data.name}  ({files.Length / (float)fps:F1} s)");
+            while (true)
+            {
+                float t0 = Time.time;
+                int i = 0;
+                var load = Task.Run(() => File.ReadAllBytes(files[0]));
+                while (true)
                 {
-                    shotCam.transform.SetPositionAndRotation(f.position, f.rotation);
-                    yield return new WaitForSeconds(1f / fps);
+                    while (!load.IsCompleted) yield return null;
+                    if (load.Status == TaskStatus.RanToCompletion) playTex.LoadImage(load.Result, false);
+                    i = Mathf.Max(i + 1, Mathf.FloorToInt((Time.time - t0) * fps) + 1);
+                    if (i >= files.Length) break;
+                    string next = files[i];
+                    load = Task.Run(() => File.ReadAllBytes(next));
+                    while (Time.time - t0 < i / (float)fps) yield return null;
                 }
                 yield return new WaitForSeconds(0.5f);
             }
+        }
+
+        void EndRide()
+        {
+            Isolate(false, SceneLayers.SceneMask);
+            if (locomotion != null) locomotion.ResetToSpawn();
+            ride = null;
+        }
+
+        static Vector3 Heading(Quaternion q) => Vector3.ProjectOnPlane(q * Vector3.forward, Vector3.up);
+
+        static float Yaw(Quaternion q)
+        {
+            Vector3 h = Heading(q);
+            return Mathf.Atan2(h.x, h.z) * Mathf.Rad2Deg;
         }
 
         // --- path sampling ----------------------------------------------------
@@ -234,21 +321,13 @@ namespace VRDirector
             return 1f;
         }
 
-        [Serializable] class Trajectory
+        ShotLibrary.ShotData NewShotData() => new()
         {
-            public string coordinates = "Unity: meters, y up, left-handed, floor at y=0";
-            public string speed;
-            public int fps, width, height;
-            public float verticalFovDeg;
-            public CameraPathTool.SavedCamera[] keyframes, frames;
-        }
-
-        string TrajectoryJson() => JsonUtility.ToJson(new Trajectory
-        {
-            speed = speed.ToString(), fps = fps, width = resolution.x, height = resolution.y, verticalFovDeg = PathCamera.VerticalFov,
+            speed = speed.ToString(), fps = fps, width = resolution.x, height = resolution.y,
+            verticalFovDeg = PathCamera.VerticalFov,
             keyframes = tool.Cameras.Select(c => new CameraPathTool.SavedCamera(c.transform.position, c.transform.rotation)).ToArray(),
             frames = frames.Select(f => new CameraPathTool.SavedCamera(f.position, f.rotation)).ToArray(),
-        }, true);
+        };
 
         // --- screen -----------------------------------------------------------
 
@@ -258,7 +337,8 @@ namespace VRDirector
             screen.name = "Shot Screen";
             screen.transform.SetParent(transform, false);
             screen.transform.localScale = new Vector3(0.8f, 0.8f * resolution.y / resolution.x, 1);
-            screen.GetComponent<Renderer>().material = new Material(screenMaterial) { mainTexture = rt };
+            screenRenderer = screen.GetComponent<Renderer>();
+            screenRenderer.material = new Material(screenMaterial) { mainTexture = rt };
             Destroy(screen.GetComponent<Collider>());
             if (SceneLayers.Overlay >= 0) screen.layer = SceneLayers.Overlay;
 

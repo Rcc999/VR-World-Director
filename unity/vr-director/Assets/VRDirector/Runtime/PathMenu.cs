@@ -10,14 +10,17 @@ namespace VRDirector
     /// <summary>
     /// The MRTK hand menu on the left palm (turn the palm toward you; poke the buttons
     /// with the right index finger): New camera / Cancel, Undo, Clear all, Save,
-    /// Speed (Slow / Medium / Fast), Generate / Close video, Reset position.
+    /// Reset position | Speed (Slow / Medium / Fast), Generate, Shots (browse, watch,
+    /// ride, edit, rename, delete; "Stop" while one plays), Help.
     /// </summary>
     public class PathMenu : MonoBehaviour
     {
         public CameraPathTool tool;
         public ShotRenderer shot;
         public VRLocomotion locomotion;
-        public PressableButton newCamera, undo, clear, save, speed, generate, resetPosition;
+        public HelpPanel help;
+        public ShotsPanel shots;
+        public PressableButton newCamera, undo, clear, save, resetPosition, speed, generate, shotsButton, helpButton;
 
         float savedAt = -10f;
 
@@ -35,11 +38,13 @@ namespace VRDirector
             clear.OnClicked.AddListener(tool.Clear);
             save.OnClicked.AddListener(() => { tool.Save(); savedAt = Time.time; });
             speed.OnClicked.AddListener(shot.CycleSpeed);
-            generate.OnClicked.AddListener(() =>
+            generate.OnClicked.AddListener(() => { help.Close(); shots.Close(); shot.Generate(); });
+            shotsButton.OnClicked.AddListener(() =>
             {
-                if (shot.IsBusy) return;
-                if (shot.ScreenVisible) shot.HideScreen(); else shot.Generate();
+                if (shot.IsWatching || shot.IsRiding) shot.Stop();
+                else { help.Close(); shots.Toggle(); }
             });
+            helpButton.OnClicked.AddListener(() => { shots.Close(); help.Toggle(); });
             resetPosition.OnClicked.AddListener(() => locomotion.ResetToSpawn());
         }
 
@@ -48,7 +53,10 @@ namespace VRDirector
             SetLabel(newCamera, tool.IsHolding ? "Cancel camera" : "New camera");
             SetLabel(save, Time.time - savedAt < 2f ? "Saved" : "Save");
             SetLabel(speed, $"Speed: {shot.speed}");
-            SetLabel(generate, shot.IsBusy ? "Rendering..." : shot.ScreenVisible ? "Close video" : "Generate");
+            SetLabel(generate, shot.IsBusy ? "Rendering..." : "Generate");
+            SetLabel(shotsButton, shot.IsWatching ? "Stop video" : shot.IsRiding ? "Stop ride"
+                                  : shots.IsOpen ? "Close shots" : "Shots");
+            SetLabel(helpButton, help.IsOpen ? "Close help" : "Help");
         }
 
         /// <summary>Sets the text of an MRTK text button (not its icon glyph).</summary>
