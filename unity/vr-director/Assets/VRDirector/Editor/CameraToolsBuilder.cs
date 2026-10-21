@@ -75,7 +75,7 @@ namespace VRDirector.Editor
             }
             // Two columns: cameras on the left, shot on the right.
             string[] labels = { "New camera", "Undo", "Clear all", "Save", "Reset position",
-                                "Speed: Medium", "Generate", "Shots", "Help" };
+                                "Speed: Medium", "Generate", "Shots", "Help", "Worlds" };
             const int rows = 5;
             const float step = 0.036f, column = 0.132f; // 128x32 mm buttons + 4 mm gaps
             backplate.localScale = new Vector3(2 * column + 0.004f, step * rows + 0.004f, 0.02f);
@@ -102,9 +102,37 @@ namespace VRDirector.Editor
             menu.locomotion = locomotion;
             (menu.newCamera, menu.undo, menu.clear, menu.save, menu.resetPosition) =
                 (buttons[0], buttons[1], buttons[2], buttons[3], buttons[4]);
-            (menu.speed, menu.generate, menu.shotsButton, menu.helpButton) = (buttons[5], buttons[6], buttons[7], buttons[8]);
+            (menu.speed, menu.generate, menu.shotsButton, menu.helpButton, menu.worldsButton) =
+                (buttons[5], buttons[6], buttons[7], buttons[8], buttons[9]);
             menu.help = AddHelpPanel(scene, origin, font, buttonPrefab);
             menu.shots = AddShotsPanel(scene, origin, font, buttonPrefab, tool, shot, locomotion);
+            menu.worlds = AddWorldsPanel(scene, origin, font, buttonPrefab, shot);
+        }
+
+        /// <summary>The scene picker: up to 8 world buttons (labels set at runtime from the build list) + Close.</summary>
+        static WorldsPanel AddWorldsPanel(Scene scene, XROrigin origin, TMP_FontAsset font, GameObject buttonPrefab,
+                                          ShotRenderer shot)
+        {
+            var go = new GameObject("Worlds Panel");
+            SceneManager.MoveGameObjectToScene(go, scene);
+            var worldButtons = new PressableButton[8];
+            for (int i = 0; i <= worldButtons.Length; i++)
+            {
+                bool isClose = i == worldButtons.Length;
+                var btn = (GameObject)PrefabUtility.InstantiatePrefab(buttonPrefab, go.transform);
+                btn.name = isClose ? "Close" : $"World {i + 1}";
+                btn.transform.localPosition = new Vector3(0, WorldsPanel.Top - i * WorldsPanel.Step, -0.012f);
+                StyleButton(btn, isClose ? "Close" : btn.name);
+                if (isClose) go.AddComponent<WorldsPanel>().close = btn.GetComponent<PressableButton>();
+                else worldButtons[i] = btn.GetComponent<PressableButton>();
+            }
+            var panel = go.GetComponent<WorldsPanel>();
+            panel.worldButtons = worldButtons;
+            panel.origin = origin;
+            panel.shotRenderer = shot;
+            panel.font = font;
+            panel.backgroundMaterial = UnlitMaterial("PanelBlack", Color.black);
+            return panel;
         }
 
         const string KeyboardPrefab = "Packages/org.mixedrealitytoolkit.uxcomponents/Experimental/NonNativeKeyboard/TouchableNonNativeKeyboard.prefab";

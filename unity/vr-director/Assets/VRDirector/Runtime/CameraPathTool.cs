@@ -15,7 +15,7 @@ namespace VRDirector
     /// - Placed cameras are numbered 1, 2, 3... in order and joined by a smooth path
     ///   (Catmull-Rom); pinch one to move or rotate it.
     /// - <see cref="Undo"/> removes the last camera, <see cref="Clear"/> all of them.
-    /// - <see cref="Save"/> writes them to &lt;persistentDataPath&gt;/camera_path.json;
+    /// - <see cref="Save"/> writes them to &lt;persistentDataPath&gt;/camera_path_&lt;scene&gt;.json;
     ///   they are loaded back when the app starts.
     /// </summary>
     public class CameraPathTool : MonoBehaviour
@@ -46,7 +46,11 @@ namespace VRDirector
             public SavedCamera[] cameras;
         }
 
-        public static string SavePath => Path.Combine(Application.persistentDataPath, "camera_path.json");
+        /// <summary>One file per scene (world): camera_path_&lt;scene&gt;.json.</summary>
+        public static string SavePath => Path.Combine(Application.persistentDataPath,
+            $"camera_path_{UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}.json");
+        /// <summary>Before worlds existed, the room's cameras were saved here.</summary>
+        static string LegacySavePath => Path.Combine(Application.persistentDataPath, "camera_path.json");
 
         readonly List<PathCamera> cameras = new();
         PathCamera held;
@@ -117,10 +121,13 @@ namespace VRDirector
 
         void Load()
         {
-            if (!File.Exists(SavePath)) return;
-            var data = JsonUtility.FromJson<SavedPath>(File.ReadAllText(SavePath));
+            string file = SavePath;
+            if (!File.Exists(file) && UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == "SplatViewer")
+                file = LegacySavePath;
+            if (!File.Exists(file)) return;
+            var data = JsonUtility.FromJson<SavedPath>(File.ReadAllText(file));
             SetCameras(data?.cameras);
-            Debug.Log($"[VR Director] Loaded {cameras.Count} cameras from {SavePath}");
+            Debug.Log($"[VR Director] Loaded {cameras.Count} cameras from {file}");
         }
 
         /// <summary>Replaces the placed cameras (e.g. with a shot's keyframes, to edit it).</summary>

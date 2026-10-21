@@ -168,4 +168,4 @@ Packages/packages-lock.json linguist-generated
 LightingData.asset     binary
 
 # Gaussian splat assets (Unity Gaussian Splatting package)
-Assets/GaussianAssets/*.bytes lfs
+Assets/GaussianAssets/**/*.bytes lfs

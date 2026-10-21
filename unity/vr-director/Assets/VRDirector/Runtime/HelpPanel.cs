@@ -17,7 +17,7 @@ namespace VRDirector
         public Material backgroundMaterial;
         public PressableButton closeButton;
 
-        public const float Width = 0.76f, Height = 0.74f;
+        public const float Width = 0.76f, Height = 0.78f;
 
         const string Text =
             "<b>VR Director - how to use</b>\n\n" +
@@ -33,7 +33,8 @@ namespace VRDirector
             "<b>Generate</b>  render a new shot along cameras 1 > 2 > 3... (shot1, shot2...)\n" +
             "<b>Shots</b>  browse your shots: Watch (screen), Ride (you move along it),\n" +
             "      Edit (its cameras come back, Generate makes a new shot), Rename, Delete\n" +
-            "<b>Reset position</b>  back to the start";
+            "<b>Reset position</b>  back to the start\n" +
+            "<b>Worlds</b>  switch scene (3DGS room, Puffin worlds); each keeps its own cameras and shots";
 
         public bool IsOpen => gameObject.activeSelf;
 

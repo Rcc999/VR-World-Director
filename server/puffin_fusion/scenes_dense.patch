@@ -1,0 +1,109 @@
+--- a/server/generation/scenes.py	2026-10-21 11:13:53
++++ b/server/generation/scenes.py	2026-10-21 11:13:53
+@@ -20,6 +20,14 @@
+ 
+     python -m generation.scenes indoor --image photo.jpg
+     python -m generation.scenes text --prompt "A sunlit Japanese garden ..."
++
++Denser re-fusion of an existing run (CPU only, minutes): upstream's defaults
++average the cloud into a 512^3 voxel grid, cap 1M points per run and skip
++views when the camera barely moves. Turn them off and keep only the first
++views of a run (e.g. the pan before it drifts):
++
++    python -m generation.scenes indoor --fuse_only --voxel_res 0 \
++        --max_points 4000000 --max_stride 1 --keep_views pan=22 --ply_name scene_unity_dense.ply
+ """
+ import argparse
+ import json
+@@ -65,6 +73,17 @@
+     p.add_argument('--seed', type=int, default=42)
+     p.add_argument('--quick', action='store_true',
+                    help='smoke test: 10 steps, one chunk per run')
++    fuse = p.add_argument_group('fusion density (upstream export_reconstruction_glb)')
++    fuse.add_argument('--voxel_res', type=int, default=512,
++                      help='voxel grid that averages the cloud (0 = off: every pixel kept)')
++    fuse.add_argument('--max_points', type=int, default=1_000_000,
++                      help='point budget per run (random subsample above it)')
++    fuse.add_argument('--max_stride', type=int, default=4,
++                      help='max view skipping on slow camera motion (1 = use every view)')
++    fuse.add_argument('--keep_views', nargs='*', default=[], metavar='RUN=N',
++                      help='fuse only the first N views of a run, e.g. pan=22')
++    fuse.add_argument('--ply_name', default='scene_unity.ply',
++                      help='output cloud name in <out>/<name>/ (keep the old one to compare)')
+     return p.parse_args()
+ 
+ 
+@@ -183,7 +202,7 @@
+ # ---------------------------------------------------------------------------
+ # fusion -> Unity
+ # ---------------------------------------------------------------------------
+-def fuse_run(frames, depths, poses, K, glb_path):
++def fuse_run(frames, depths, poses, K, glb_path, args):
+     """Upstream fusion for one run; returns OpenCV-frame points + colors."""
+     import torch
+     import trimesh
+@@ -193,7 +212,9 @@
+     tens = [torch.from_numpy(f).permute(2, 0, 1).float() / 127.5 - 1.0 for f in frames]
+     export_reconstruction_glb(tens, [d.astype(np.float64) for d in depths],
+                               [np.array2string(p) for p in poses],
+-                              [np.array2string(K)] * len(poses), str(glb_path))
++                              [np.array2string(K)] * len(poses), str(glb_path),
++                              max_points=args.max_points, voxel_res=args.voxel_res,
++                              max_stride=args.max_stride)
+     cloud = next(g for g in trimesh.load(glb_path).geometry.values()
+                  if isinstance(g, trimesh.PointCloud))
+     # export_reconstruction_glb flips OpenCV -> glTF with diag(1, -1, -1).
+@@ -218,14 +239,16 @@
+     runs = [str(r) for r in raw['runs']] if 'runs' in raw else ['pan', 'walk']
+     # Every run generates the seed view's depth: put each on the first run's
+     # scale (the walk's poses were laid out in those depth units).
++    keep = {k: int(v) for k, v in (kv.split('=') for kv in args.keep_views)}
+     ref = raw[f'{runs[0]}_depths'][0].astype(np.float32)
+     clouds = []
+     for name in runs:
+-        d = raw[f'{name}_depths'].astype(np.float32)
++        n = keep.get(name)  # None = all views
++        d = raw[f'{name}_depths'][:n].astype(np.float32)
+         ok = (ref > 0) & (d[0] > 0)
+         d *= float(np.median(ref[ok] / d[0][ok])) if ok.sum() > 100 else 1.0
+-        clouds.append(fuse_run(raw[f'{name}_frames'], d, raw[f'{name}_poses'], K,
+-                               out / f'{name}.glb'))
++        clouds.append(fuse_run(raw[f'{name}_frames'][:n], d, raw[f'{name}_poses'][:n], K,
++                               out / f'{name}.glb', args))
+     pts = opencv_to_unity(np.concatenate([c[0] for c in clouds]))
+     rgb = np.concatenate([c[1] for c in clouds])
+ 
+@@ -242,10 +265,10 @@
+     pts, R, cam_height = level_to_floor(pts, normal, d)
+     scale = args.camera_height / cam_height
+     pts *= scale
+-    write_ply(out / 'scene_unity.ply', pts, rgb)
++    write_ply(out / args.ply_name, pts, rgb)
+ 
+     tilt = math.degrees(math.acos(np.clip(normal @ up_unity / np.linalg.norm(up_unity), -1, 1)))
+-    traj = {tag: [to_unity_pose(p, R, d, scale).tolist() for p in raw[f'{tag}_poses']]
++    traj = {tag: [to_unity_pose(p, R, d, scale).tolist() for p in raw[f'{tag}_poses'][:keep.get(tag)]]
+             for tag in runs}
+     meta = json.loads((out / 'meta.json').read_text())
+     meta.update(
+@@ -253,16 +276,18 @@
+         floor_vs_gravity_deg=round(tilt, 2),
+         estimated_camera_height=float(cam_height), scale_to_meters=float(scale),
+         camera_height_m=args.camera_height,
++        fusion=dict(voxel_res=args.voxel_res, max_points=args.max_points,
++                    max_stride=args.max_stride, keep_views=keep),
+         intrinsics_640=K.tolist(),
+         trajectories_unity_c2w=traj,
+         conventions=('Unity frame: +x right, +y up, +z forward, meters, floor '
+                      'y=0, seed camera at (0, camera_height_m, 0). c2w columns '
+                      'are the camera right/up/forward axes and position.'))
+-    (out / 'scene.json').write_text(json.dumps(meta, indent=1))
++    (out / (Path(args.ply_name).stem.replace('scene_unity', 'scene') + '.json')).write_text(json.dumps(meta, indent=1))
+     lo, hi = np.percentile(pts, [1, 99], axis=0)
+     print(f"{len(pts)} points | floor {floor} ({tilt:.1f} deg off gravity) | "
+           f"camera height {cam_height:.3f} -> x{scale:.2f} = {args.camera_height} m | "
+-          f"extent {np.round(hi - lo, 1)} m -> {out / 'scene_unity.ply'}")
++          f"extent {np.round(hi - lo, 1)} m -> {out / args.ply_name}")
+ 
+ 
+ def main():
