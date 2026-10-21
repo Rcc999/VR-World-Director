@@ -26,7 +26,7 @@ import numpy as np
 
 SERVER_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVER_DIR))
-W, H = 392, 518          # multiples of VGGT's 14-px patches, ~3:4 portrait
+LONG_SIDE = 518          # VGGT's training resolution; both sides multiples of 14 px
 
 
 def main():
@@ -57,11 +57,14 @@ def predict(args, out):
 
     names = sorted(f for f in os.listdir(args.images)
                    if f.lower().endswith(('.jpg', '.jpeg', '.png')))
+    first = Image.open(os.path.join(args.images, names[0]))
+    short = int(round(LONG_SIDE * min(first.size) / max(first.size) / 14)) * 14
+    W, H = (LONG_SIDE, short) if first.width > first.height else (short, LONG_SIDE)
     imgs = []
     for n in names:
         im = Image.open(os.path.join(args.images, n)).convert('RGB')
-        if im.width > im.height:
-            raise SystemExit(f'{n} is landscape; this script assumes portrait photos')
+        if (im.width > im.height) != (W > H):
+            raise SystemExit(f'{n}: mixed portrait and landscape images')
         imgs.append(np.asarray(im.resize((W, H), Image.LANCZOS)))
     x = torch.from_numpy(np.stack(imgs)).permute(0, 3, 1, 2).float().div(255).cuda()
 
@@ -113,6 +116,7 @@ def fuse(args, out):
     v = np.load(out / 'vggt.npz')
     names = [str(n) for n in v['names']]
     imgs, c2w, intr = v['images'], v['c2w'], v['K']
+    H, W = imgs.shape[1:3]
     depth, conf = v['depth'].astype(np.float32), v['conf'].astype(np.float32)
 
     # Fuse the photos' own depth: confident pixels only.
