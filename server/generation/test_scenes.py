@@ -49,17 +49,17 @@ def main():
     seed = np.eye(4)
     seed[:3, :3] = [[1, 0, 0], [0, c, -s], [0, s, c]]   # pitch about camera x
     up = scenes.gravity_up(PITCH)
-    pan = scenes.pan_poses(57, 6.5, up)
-    walk = scenes.walk_poses(15, 0.04 * UNITS_PER_M * 2.0, up)
+    runs = {'left': scenes.pan_poses(29, -6.5, up),     # +-182 deg: whole room seen
+            'right': scenes.pan_poses(29, 6.5, up),
+            'walk': scenes.walk_poses(15, 0.04 * UNITS_PER_M * 2.0, up)}
+    gauge = {'left': 1.0, 'right': 0.8, 'walk': 1.3}     # per-run depth scale drift
 
-    raw = {}
-    for tag, poses in (('pan', pan), ('walk', walk)):
+    raw = {'runs': np.array(list(runs))}
+    for tag, poses in runs.items():
         rendered = [render(seed @ p, K) for p in poses]
-        raw[f'{tag}_depths'] = np.stack([r[0] for r in rendered]).astype(np.float16)
+        raw[f'{tag}_depths'] = (np.stack([r[0] for r in rendered]) * gauge[tag]).astype(np.float16)
         raw[f'{tag}_frames'] = np.stack([r[1] for r in rendered])
         raw[f'{tag}_poses'] = np.stack(poses)
-    # The walk run's depth gauge drifts from the pan's; fusion must undo it.
-    raw['walk_depths'] = (raw['walk_depths'].astype(np.float32) * 1.3).astype(np.float16)
 
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp)
@@ -84,7 +84,7 @@ def main():
     assert np.allclose(hi[[0, 2]], expect_hi[[0, 2]], atol=0.1), 'extent (x/z max)'
     assert CAM_H < hi[1] <= expect_hi[1] + 0.05, 'extent (height)'
     assert floor_band > 0.05, f'only {floor_band:.1%} of points on y=0'
-    cam0 = np.array(meta['trajectories_unity_c2w']['pan'][0])
+    cam0 = np.array(meta['trajectories_unity_c2w']['left'][0])
     assert np.allclose(cam0[:3, 3], [0, CAM_H, 0], atol=0.02), f'seed camera at {cam0[:3, 3]}'
     fwd = cam0[:3, 2]
     assert fwd[2] > 0.9 and fwd[1] < 0, f'seed camera should look +z, slightly down: {fwd}'

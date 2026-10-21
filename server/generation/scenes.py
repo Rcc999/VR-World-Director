@@ -1,19 +1,22 @@
 """WP2 seed scenes: one photo or text prompt -> Puffin-World -> scene_unity.ply.
 
-Two camera runs from the seed view, both generated with depth:
-  pan   turn in place 360 deg about the gravity up-axis Puffin estimates
-        (deg_per_view close to upstream's 4 deg default for synthetic paths)
-  walk  move forward along the horizontal view direction
-Each run is fused with upstream's export_reconstruction_glb (per-view depth
-gauges, flying-pixel filter, voxel denoise), the walk is put on the pan's
-depth scale via the seed view (both runs generate its depth), and the merged
-cloud is written in the Unity viewer's frame, like depth/depth_standin.py:
+Short camera runs out of the seed view, all generated with depth:
+  left / right  turn in place about the gravity up-axis Puffin estimates
+  walk          move forward along the horizontal view direction
+Each run is its own short autoregressive chain from the seed: one long
+360-degree chain (11 chunks) drifted into invented places and faded to black
+after ~3 chunks, while short chains at CFG 2 hold (sweep_drift.py, 2026-10-21:
+indoor stays consistent for 4 chunks = 140 deg, the golden-hour plaza for ~2
+before drifting toward night). Each run is fused with upstream's
+export_reconstruction_glb (per-view depth gauges, flying-pixel filter, voxel
+denoise), every run is put on the first run's depth scale via the seed view
+(they all generate its depth), and the merged cloud is written in the Unity viewer's frame, like depth/depth_standin.py:
 floor at y = 0, meters (scaled so the seed camera is --camera_height above
 the floor), seed camera at x = z = 0 looking down +z.
 
 Outputs in <out>/<name>/: scene_unity.ply, scene.json (seed camera, scale,
-trajectories), pan.mp4 / walk.mp4, pan.glb / walk.glb, raw.npz (frames,
-depths, poses: re-fuse without regenerating via --fuse_only).
+trajectories), <run>.mp4 / <run>.glb, raw.npz (frames, depths, poses per
+run: re-fuse without regenerating via --fuse_only).
 
     python -m generation.scenes indoor --image photo.jpg
     python -m generation.scenes text --prompt "A sunlit Japanese garden ..."
@@ -47,8 +50,12 @@ def parse_args():
     p.add_argument('--model', choices=('pro', 'base'), default='pro')
     p.add_argument('--out', default=str(SERVER_DIR / 'outputs' / 'scenes'))
     p.add_argument('--num_steps', type=int, default=50)
-    p.add_argument('--deg_per_view', type=float, default=5.0)
-    p.add_argument('--pan_deg', type=float, default=360.0)
+    p.add_argument('--cfg_scale', type=float, default=2.0,
+                   help='4.0 (upstream free-view demo) fades long chains faster')
+    p.add_argument('--deg_per_view', type=float, default=5.0,
+                   help='8 deg/view changed the scene within 2 chunks')
+    p.add_argument('--turn_chunks', type=int, default=3,
+                   help='chunks per left / right branch (7 views = 35 deg each at 5 deg)')
     p.add_argument('--walk_chunks', type=int, default=2)
     p.add_argument('--walk_step', type=float, default=0.04,
                    help='forward step per view as a fraction of the seed '
@@ -106,8 +113,8 @@ def chunks_for(views_needed, num_views=8):
 # generation
 # ---------------------------------------------------------------------------
 def run_path(pr, model, seed_img, poses, K, cam, args):
-    r = pr.generate(model, seed_img, poses, K, cam, num_steps=args.num_steps,
-                    seed=args.seed)
+    r = pr.generate(model, seed_img, poses, K, cam, cfg_scale=args.cfg_scale,
+                    num_steps=args.num_steps, seed=args.seed)
     frames = [seed_img] + [f.float().cpu() for f in r['gen_images_tensor'][0]]
     depths = [np.squeeze(np.asarray(d.float().cpu() if hasattr(d, 'cpu') else d,
                                     dtype=np.float32))
@@ -139,35 +146,35 @@ def generate_scene(args, out):
     K = pr.intrinsics_from_vfov(cam[2], res=seed_img.shape[-1])
     up = gravity_up(cam[1])
 
-    n_pan = 1 if args.quick else chunks_for(args.pan_deg / args.deg_per_view + 1)
-    pan = pan_poses(pr.views_for_chunks(n_pan), args.deg_per_view, up)
-    pan_frames, pan_depths = run_path(pr, model, seed_img, pan, K, cam, args)
-    pan = pan[:len(pan_frames)]
-    np.savez_compressed(out / 'raw_pan.npz', K=K, cam=np.asarray(cam), up=up,
-                        pan_frames=pan_frames, pan_depths=pan_depths.astype(np.float16),
-                        pan_poses=np.stack(pan))
-    print(f"pan: {len(pan)} views, {(len(pan) - 1) * args.deg_per_view:.0f} deg",
-          flush=True)
-
-    d0 = pan_depths[0][pan_depths[0] > 0]
-    step = args.walk_step * float(np.median(d0))
+    n_turn = 1 if args.quick else args.turn_chunks
     n_walk = 1 if args.quick else args.walk_chunks
-    walk = walk_poses(pr.views_for_chunks(n_walk), step, up)
-    walk_frames, walk_depths = run_path(pr, model, seed_img, walk, K, cam, args)
-    walk = walk[:len(walk_frames)]
-    print(f"walk: {len(walk)} views, step {step:.4f} (depth units)", flush=True)
+    turn_views = pr.views_for_chunks(n_turn)
+    raw = dict(K=K, cam=np.asarray(cam), up=up)
+    plan = [('left', lambda: pan_poses(turn_views, -args.deg_per_view, up)),
+            ('right', lambda: pan_poses(turn_views, args.deg_per_view, up)),
+            # walk step needs a depth scale: the first run's seed-view depth
+            ('walk', lambda: walk_poses(pr.views_for_chunks(n_walk), step, up))]
+    step = None
+    for name, make_poses in plan:
+        if name == 'walk':
+            d0 = raw['left_depths'][0].astype(np.float32)
+            step = args.walk_step * float(np.median(d0[d0 > 0]))
+        poses = make_poses()
+        frames, depths = run_path(pr, model, seed_img, poses, K, cam, args)
+        raw.update({f'{name}_frames': frames, f'{name}_depths': depths.astype(np.float16),
+                    f'{name}_poses': np.stack(poses[:len(frames)])})
+        raw['runs'] = np.array([n for n, _ in plan if f'{n}_frames' in raw])
+        np.savez_compressed(out / 'raw.npz', **raw)    # keep finished runs if a later one fails
+        save_frames_as_mp4(list(frames), str(out / f'{name}.mp4'), fps=8)
+        print(f"{name}: {len(frames)} views" + (f", step {step:.4f} (depth units)"
+              if name == 'walk' else f", {(len(frames) - 1) * args.deg_per_view:.0f} deg"),
+              flush=True)
 
-    for tag, fr in (('pan', pan_frames), ('walk', walk_frames)):
-        save_frames_as_mp4(list(fr), str(out / f'{tag}.mp4'), fps=8)
-    np.savez_compressed(
-        out / 'raw.npz', K=K, cam=np.asarray(cam), up=up,
-        pan_frames=pan_frames, pan_depths=pan_depths.astype(np.float16),
-        pan_poses=np.stack(pan), walk_frames=walk_frames,
-        walk_depths=walk_depths.astype(np.float16), walk_poses=np.stack(walk))
     (out / 'meta.json').write_text(json.dumps(dict(
         caption=caption, cam_rad=dict(zip(('roll', 'pitch', 'vfov', 'k1'), cam)),
         source=args.image or args.prompt, model=args.model,
-        num_steps=args.num_steps, deg_per_view=args.deg_per_view,
+        num_steps=args.num_steps, cfg_scale=args.cfg_scale,
+        deg_per_view=args.deg_per_view, turn_chunks=n_turn, walk_chunks=n_walk,
         walk_step=args.walk_step, seed=args.seed), indent=1))
     del model
     torch.cuda.empty_cache()
@@ -208,18 +215,19 @@ def fuse_scene(args, out):
                                    write_ply)
     raw = np.load(out / 'raw.npz')
     K = raw['K']
-    pan_d = raw['pan_depths'].astype(np.float32)
-    walk_d = raw['walk_depths'].astype(np.float32)
-    # Both runs generate the seed view's depth: put the walk on the pan's
-    # scale (its poses were laid out in pan depth units).
-    a, b = pan_d[0], walk_d[0]
-    ok = (a > 0) & (b > 0)
-    walk_d *= float(np.median(a[ok] / b[ok])) if ok.sum() > 100 else 1.0
-
-    pts_p, rgb_p = fuse_run(raw['pan_frames'], pan_d, raw['pan_poses'], K, out / 'pan.glb')
-    pts_w, rgb_w = fuse_run(raw['walk_frames'], walk_d, raw['walk_poses'], K, out / 'walk.glb')
-    pts = opencv_to_unity(np.concatenate([pts_p, pts_w]))
-    rgb = np.concatenate([rgb_p, rgb_w])
+    runs = [str(r) for r in raw['runs']] if 'runs' in raw else ['pan', 'walk']
+    # Every run generates the seed view's depth: put each on the first run's
+    # scale (the walk's poses were laid out in those depth units).
+    ref = raw[f'{runs[0]}_depths'][0].astype(np.float32)
+    clouds = []
+    for name in runs:
+        d = raw[f'{name}_depths'].astype(np.float32)
+        ok = (ref > 0) & (d[0] > 0)
+        d *= float(np.median(ref[ok] / d[0][ok])) if ok.sum() > 100 else 1.0
+        clouds.append(fuse_run(raw[f'{name}_frames'], d, raw[f'{name}_poses'], K,
+                               out / f'{name}.glb'))
+    pts = opencv_to_unity(np.concatenate([c[0] for c in clouds]))
+    rgb = np.concatenate([c[1] for c in clouds])
 
     up_unity = opencv_to_unity(raw['up'][None])[0]
     try:
@@ -238,7 +246,7 @@ def fuse_scene(args, out):
 
     tilt = math.degrees(math.acos(np.clip(normal @ up_unity / np.linalg.norm(up_unity), -1, 1)))
     traj = {tag: [to_unity_pose(p, R, d, scale).tolist() for p in raw[f'{tag}_poses']]
-            for tag in ('pan', 'walk')}
+            for tag in runs}
     meta = json.loads((out / 'meta.json').read_text())
     meta.update(
         points=int(len(pts)), floor_fit=floor,
