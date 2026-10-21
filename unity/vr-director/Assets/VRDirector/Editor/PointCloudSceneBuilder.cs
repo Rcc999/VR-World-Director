@@ -91,7 +91,8 @@ namespace VRDirector.Editor
 
         /// <summary>
         /// The build = every world, the 3DGS room first (it opens at start), then the
-        /// Puffin scenes; everything else (HelloCube, PointCloudViewer...) is disabled.
+        /// Puffin scenes, then the world state scenes (Scenes/WorldStates/); everything
+        /// else (HelloCube, PointCloudViewer...) is disabled.
         /// </summary>
         internal static void EnableWorldScenes()
         {
@@ -99,9 +100,11 @@ namespace VRDirector.Editor
             if (File.Exists(SplatScene)) worlds.Add(SplatScene);
             if (Directory.Exists(PuffinScenes))
                 worlds.AddRange(Directory.GetFiles(PuffinScenes, "*.unity").OrderBy(p => p).Select(p => p.Replace('\\', '/')));
+            if (Directory.Exists(WorldState.ScenesFolder))
+                worlds.AddRange(Directory.GetFiles(WorldState.ScenesFolder, "*.unity").OrderBy(p => p).Select(p => p.Replace('\\', '/')));
             EditorBuildSettings.scenes = worlds.Select(p => new EditorBuildSettingsScene(p, true))
                 .Concat(EditorBuildSettings.scenes
-                    .Where(s => !worlds.Contains(s.path))
+                    .Where(s => !worlds.Contains(s.path) && File.Exists(s.path))
                     .Select(s => new EditorBuildSettingsScene(s.path, false)))
                 .ToArray();
             Debug.Log("[VR Director] Build scenes: " + string.Join(", ", worlds));

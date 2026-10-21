@@ -24,6 +24,8 @@ namespace VRDirector
         public PressableButton close;
 
         public const float Width = 0.30f, Step = 0.036f, Top = 0.05f;
+        const int MaxPerColumn = 6;     // more worlds than this: two columns
+        const float ColumnStep = 0.144f; // 128 mm buttons + 16 mm gap
 
         public bool IsOpen => gameObject.activeSelf;
 
@@ -49,26 +51,31 @@ namespace VRDirector
 
             var worlds = Worlds();
             string current = SceneManager.GetActiveScene().path;
+            int count = Mathf.Min(worlds.Count, worldButtons.Length);
+            int columns = count > MaxPerColumn ? 2 : 1, perColumn = Mathf.CeilToInt(count / (float)columns);
             for (int i = 0; i < worldButtons.Length; i++)
             {
                 var b = worldButtons[i];
                 bool used = i < worlds.Count;
                 b.gameObject.SetActive(used);
                 if (!used) continue;
+                int col = i / perColumn, row = i % perColumn;
+                b.transform.localPosition = new Vector3(columns == 2 ? (col - 0.5f) * ColumnStep : 0,
+                                                        Top - row * Step, b.transform.localPosition.z);
                 string path = worlds[i];
                 bool here = path == current;
                 PathMenu.SetLabel(b, here ? $"> {DisplayName(path)} <" : DisplayName(path));
                 b.enabled = !here;
                 b.OnClicked.AddListener(() => Load(path));
             }
-            int rows = Mathf.Min(worlds.Count, worldButtons.Length) + 1; // + Close
+            int rows = perColumn + 1; // + Close
             if (close != null)
             {
                 close.transform.localPosition = new Vector3(0, Top - Step * (rows - 1), -0.012f);
                 close.OnClicked.AddListener(Close);
             }
             float height = Step * rows + 0.04f;
-            bg.transform.localScale = new Vector3(Width, height, 1);
+            bg.transform.localScale = new Vector3(columns == 2 ? Width + ColumnStep : Width, height, 1);
             bg.transform.localPosition = new Vector3(0, Top + 0.05f - height / 2, 0);
             title.text = "<b>Worlds</b>";
             gameObject.SetActive(false);
