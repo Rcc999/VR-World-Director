@@ -8,6 +8,10 @@
 // (TEXCOORD0.z, meters) taken from the splat's footprint. Clouds without it
 // (single depth map) grow with distance from the capture camera, so
 // neighboring pixels of the depth map still touch: spacing ~ depth / focal_px.
+//
+// Color mode (globals set by WorldState, so every cloud follows the menu):
+// 0 = the cloud's own colors, 1 = height above the floor (y), 2 = distance to the
+// viewer. Modes 1-2 use turbo colors like the server's depth videos (red = near / high).
 Shader "VRDirector/PointCloud"
 {
     Properties
@@ -43,6 +47,26 @@ Shader "VRDirector/PointCloud"
                 float4 _CaptureOrigin;
             CBUFFER_END
 
+            // Globals (Shader.SetGlobalFloat), not per material: 0 when unset = own colors.
+            float _VRDColorMode;
+            float _VRDHeightMax;
+            float _VRDDepthMax;
+
+            // Turbo colormap, polynomial fit (Mikhailov 2019), t in 0..1, sRGB out.
+            half3 Turbo(float t)
+            {
+                const float4 kR4 = float4(0.13572138, 4.61539260, -42.66032258, 132.13108234);
+                const float4 kG4 = float4(0.09140261, 2.19418839, 4.84296658, -14.18503333);
+                const float4 kB4 = float4(0.10667330, 12.64194608, -60.58204836, 110.36276771);
+                const float2 kR2 = float2(-152.94239396, 59.28637943);
+                const float2 kG2 = float2(4.27729857, 2.82956604);
+                const float2 kB2 = float2(-89.90310912, 27.34824973);
+                t = saturate(t);
+                float4 v4 = float4(1.0, t, t * t, t * t * t);
+                float2 v2 = v4.zw * v4.z;
+                return half3(dot(v4, kR4) + dot(v2, kR2), dot(v4, kG4) + dot(v2, kG2), dot(v4, kB4) + dot(v2, kB2));
+            }
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -70,15 +94,22 @@ Shader "VRDirector/PointCloud"
                                             : max(_SizePerMeter * dist, _MinSize);
                 float halfSize = 0.5 * objectScale * size;
 
-                float3 positionVS = TransformWorldToView(TransformObjectToWorld(v.positionOS.xyz));
+                float3 positionWS = TransformObjectToWorld(v.positionOS.xyz);
+                float3 positionVS = TransformWorldToView(positionWS);
                 positionVS.xy += v.corner.xy * halfSize;
                 o.positionCS = TransformWViewToHClip(positionVS);
 
+                half3 color = v.color.rgb;
+                if (_VRDColorMode > 0.5 && _VRDColorMode < 1.5)
+                    color = Turbo(positionWS.y / max(_VRDHeightMax, 0.01));
+                else if (_VRDColorMode > 1.5)
+                    color = Turbo(1 - length(positionWS - GetCameraPositionWS()) / max(_VRDDepthMax, 0.01));
+
                 // PLY colors are sRGB bytes; the project renders in linear space.
                 #if UNITY_COLORSPACE_GAMMA
-                    o.color = v.color.rgb;
+                    o.color = color;
                 #else
-                    o.color = SRGBToLinear(v.color.rgb);
+                    o.color = SRGBToLinear(color);
                 #endif
                 return o;
             }

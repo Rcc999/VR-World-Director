@@ -5,3 +5,4 @@
 
 # Captured photos (data/); raw videos are not in git, see .gitignore
 data/**/*.[Jj][Pp][Gg]    lfs
+data/**/*.[Jj][Pp][Ee][Gg] lfs

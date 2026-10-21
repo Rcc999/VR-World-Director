@@ -19,6 +19,7 @@ Run every command **from `server/`** (scripts are modules). Outputs go to `serve
 | `splat_gaussians/` | Splat → pruned splat (300k) + Unity transform, rendered as real Gaussians. Realistic. |
 | `shots/` | Pulls a shot rendered on the headset and makes an MP4. |
 | `puffin_fusion/` | Puffin-World runs → denser point clouds (`dense_fuse.py`), and a 3DGS training set from them (`to_3dgs_dataset.py`, experiment). |
+| `world_state/` | Copies a Puffin world state export into Unity (`Assets/WorldStates/`), videos re-encoded to H.264. |
 
 ## Depth (one photo)
 
