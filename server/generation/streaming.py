@@ -59,6 +59,8 @@ class Chunk:
     poses: list                       # 4x4 OpenCV c2w per new view
     anchor_depth: np.ndarray          # depth of the window's first view (the seed for chunk 0)
     seconds: float
+    physics: list = None              # per new view: dict(roll, pitch, vfov, k1) in radians,
+                                      # the perspective-field params Puffin conditioned it on
 
 
 def seed_state(seed_img, seed_pose=None):
@@ -148,8 +150,11 @@ def stream(model, state, poses, K, cam_params, num_steps=50, cfg_scale=4.0,
         lat = out.get('latents')
         state.latent = lat[0][last].detach() if lat is not None else None
         pp = out.get('pp_cam_params')
+        physics = None
         if pp is not None:
             state.pp_anchor = pp[0][1 + last]
+            physics = [dict(zip(('roll', 'pitch', 'vfov', 'k1'), map(float, str(x).split())))
+                       for x in pp[0][1:1 + n_new]]
         first_id = state.views_done
         state.views_done += n_new
 
@@ -161,4 +166,5 @@ def stream(model, state, poses, K, cam_params, num_steps=50, cfg_scale=4.0,
             depths=depths,
             poses=[np.asarray(_parse_4x4(p)) for p in window[1:1 + n_new]],
             anchor_depth=anchor_depth,
-            seconds=time.perf_counter() - t0)
+            seconds=time.perf_counter() - t0,
+            physics=physics)

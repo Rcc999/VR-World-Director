@@ -219,13 +219,18 @@ def fuse_scene(args, out):
     # Every run generates the seed view's depth: put each on the first run's
     # scale (the walk's poses were laid out in those depth units).
     ref = raw[f'{runs[0]}_depths'][0].astype(np.float32)
-    clouds = []
+    # The seed view (the photo, or the T2I image) is fused once on its own so
+    # the VR menu can show / hide generated content; runs add only their
+    # generated views (from view 1).
+    clouds = [fuse_run(raw[f'{runs[0]}_frames'][:1], ref[None], raw[f'{runs[0]}_poses'][:1],
+                       K, out / 'seed.glb')]
     for name in runs:
         d = raw[f'{name}_depths'].astype(np.float32)
         ok = (ref > 0) & (d[0] > 0)
         d *= float(np.median(ref[ok] / d[0][ok])) if ok.sum() > 100 else 1.0
-        clouds.append(fuse_run(raw[f'{name}_frames'], d, raw[f'{name}_poses'], K,
+        clouds.append(fuse_run(raw[f'{name}_frames'][1:], d[1:], raw[f'{name}_poses'][1:], K,
                                out / f'{name}.glb'))
+    n_seed = len(clouds[0][0])
     pts = opencv_to_unity(np.concatenate([c[0] for c in clouds]))
     rgb = np.concatenate([c[1] for c in clouds])
 
@@ -245,6 +250,8 @@ def fuse_scene(args, out):
         raise SystemExit(f'floor fit put the seed camera below the floor (height {cam_height:.3f})')
     pts *= scale
     write_ply(out / 'scene_unity.ply', pts, rgb)
+    write_ply(out / 'photo.ply', pts[:n_seed], rgb[:n_seed])
+    write_ply(out / 'generated.ply', pts[n_seed:], rgb[n_seed:])
 
     tilt = math.degrees(math.acos(np.clip(normal @ up_unity / np.linalg.norm(up_unity), -1, 1)))
     traj = {tag: [to_unity_pose(p, R, d, scale).tolist() for p in raw[f'{tag}_poses']]
@@ -257,6 +264,9 @@ def fuse_scene(args, out):
         camera_height_m=args.camera_height,
         intrinsics_640=K.tolist(),
         trajectories_unity_c2w=traj,
+        unity=dict(R_level=R.tolist(), floor_offset=float(d), scale_to_meters=float(scale)),
+        clouds=dict(full='scene_unity.ply', photo='photo.ply', generated='generated.ply',
+                    photo_points=int(n_seed), generated_points=int(len(pts) - n_seed)),
         conventions=('Unity frame: +x right, +y up, +z forward, meters, floor '
                      'y=0, seed camera at (0, camera_height_m, 0). c2w columns '
                      'are the camera right/up/forward axes and position.'))
