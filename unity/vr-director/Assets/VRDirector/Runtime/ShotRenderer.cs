@@ -76,7 +76,7 @@ namespace VRDirector
             shotCam.fieldOfView = PathCamera.VerticalFov;
             shotCam.aspect = (float)resolution.x / resolution.y;
             shotCam.nearClipPlane = 0.02f;
-            shotCam.farClipPlane = 50f;
+            shotCam.farClipPlane = 1000f; // Puffin worlds reach ~150 m (sky shell)
             shotCam.clearFlags = CameraClearFlags.SolidColor;
             shotCam.backgroundColor = Color.black;
             shotCam.cullingMask = SceneLayers.SceneMask; // the room only: no hands, menus, cameras

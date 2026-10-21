@@ -16,10 +16,10 @@ namespace VRDirector.Editor
     /// the real cloud and the generated cloud as separate objects, a
     /// <see cref="WorldState"/> baked from world_state/world_state.json (runs, poses,
     /// roll / pitch, caption, physics check, the run videos), and the World button +
-    /// panel on the hand menu. Same XR rig and tools as the point cloud viewer; cameras
-    /// are saved per scene. <b>Build All World State Scenes</b> does every folder. The built
-    /// scene starts the app and every built world state scene is in the build, so
-    /// &lt; Scene / Scene &gt; in the World panel switches between them.
+    /// panel on the hand menu. Same XR rig and tools as the point cloud viewer (cameras and
+    /// shots per scene). <b>Build All World State Scenes</b> does every folder. Every built
+    /// world state scene joins the build's worlds (after the room and the Puffin worlds),
+    /// so the Worlds panel switches to it.
     /// </summary>
     public static class WorldStateSceneBuilder
     {
@@ -48,33 +48,15 @@ namespace VRDirector.Editor
             if (folders.Length == 0) { Debug.LogError($"[VR Director] No world states in {Root}"); return; }
             if (!EditorSceneManagerSave()) return;
             var built = folders.Select(BuildScene).Where(p => p != null).ToList();
-            if (built.Count > 0) SetBuildScenes(built[0]);
+            if (built.Count > 0) PointCloudSceneBuilder.EnableWorldScenes();
         }
 
-        /// <summary>Builds one folder, e.g. "Assets/WorldStates/ruin", and makes it the start scene (also for -executeMethod).</summary>
+        /// <summary>Builds one folder, e.g. "Assets/WorldStates/ruin", and adds it to the build's worlds (also for -executeMethod).</summary>
         public static void Build(string folder)
         {
             if (!EditorSceneManagerSave()) return;
             var path = BuildScene(folder);
-            if (path != null) SetBuildScenes(path);
-        }
-
-        /// <summary>
-        /// Build settings: <paramref name="first"/> starts the app, then every other world state
-        /// scene (enabled, for the scene buttons); all other scenes stay listed but disabled.
-        /// </summary>
-        static void SetBuildScenes(string first)
-        {
-            var worlds = Directory.Exists(WorldState.ScenesFolder)
-                ? Directory.GetFiles(WorldState.ScenesFolder, "*.unity").Select(f => f.Replace('\\', '/')).OrderBy(f => f).ToList()
-                : new List<string>();
-            worlds.Remove(first);
-            worlds.Insert(0, first);
-            EditorBuildSettings.scenes = worlds.Select(p => new EditorBuildSettingsScene(p, true))
-                .Concat(EditorBuildSettings.scenes.Where(s => !worlds.Contains(s.path) && File.Exists(s.path))
-                                                  .Select(s => new EditorBuildSettingsScene(s.path, false)))
-                .ToArray();
-            Debug.Log($"[VR Director] Build scenes: {string.Join(", ", worlds)} (starts with {Path.GetFileNameWithoutExtension(first)}).");
+            if (path != null) PointCloudSceneBuilder.EnableWorldScenes();
         }
 
         static string BuildScene(string folder)
@@ -95,8 +77,6 @@ namespace VRDirector.Editor
             world.origin = Object.FindFirstObjectByType<XROrigin>();
             Bake(world, JObject.Parse(File.ReadAllText(jsonPath)), folder);
             CameraToolsBuilder.AddWorldMenu(scene, world.origin, world);
-            var tool = Object.FindFirstObjectByType<CameraPathTool>();
-            if (tool != null) tool.saveName = $"camera_path_{world.sceneName}"; // cameras per world
 
             Directory.CreateDirectory(WorldState.ScenesFolder);
             string path = $"{WorldState.ScenesFolder}{world.sceneName}.unity";

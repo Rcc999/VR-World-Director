@@ -73,11 +73,11 @@ namespace VRDirector.Editor
                 hc.SafeZone = HandConstraint.SolverSafeZone.AtopPalm;
                 hc.SafeZoneBuffer = 0.05f;
             }
-            // Two headed columns (CAMERAS | SHOTS & WORLD), then a divider and the general
-            // buttons; slot (1, 3) is World in world state scenes (AddWorldMenu), else empty.
+            // Two headed columns (CAMERAS | SHOTS), then a divider and the scene / general
+            // buttons: Worlds | World state (world state scenes only, AddWorldMenu), Reset | Help.
             string[] labels = { "New camera", "Undo", "Clear all", "Save", "Reset position",
-                                "Speed: Medium", "Generate", "Shots", "Help" };
-            (int col, int row)[] slots = { (0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 0), (1, 1), (1, 2), (1, 4) };
+                                "Speed: Medium", "Generate", "Shots", "Help", "Worlds" };
+            (int col, int row)[] slots = { (0, 0), (0, 1), (0, 2), (0, 3), (0, 5), (1, 0), (1, 1), (1, 2), (1, 5), (0, 4) };
             backplate.localScale = new Vector3(MenuWidth, MenuHeight, 0.02f);
 
             var buttons = new PressableButton[labels.Length];
@@ -92,7 +92,7 @@ namespace VRDirector.Editor
                 StyleButton(b, labels[i]);
             }
             AddHeader(collection, "CAMERAS", new Vector3(-MenuColumn / 2, MenuHeaderY, -0.012f), font);
-            AddHeader(collection, "SHOTS & WORLD", new Vector3(MenuColumn / 2, MenuHeaderY, -0.012f), font);
+            AddHeader(collection, "SHOTS", new Vector3(MenuColumn / 2, MenuHeaderY, -0.012f), font);
             AddDivider(collection, new Vector3(0, (MenuSlot(0, 3).y + MenuSlot(0, 4).y) / 2, -0.012f), MenuWidth - 0.02f);
 
             // UI layer: the menu stays visible while you ride a shot (headset then shows Scene + UI).
@@ -104,16 +104,44 @@ namespace VRDirector.Editor
             menu.locomotion = locomotion;
             (menu.newCamera, menu.undo, menu.clear, menu.save, menu.resetPosition) =
                 (buttons[0], buttons[1], buttons[2], buttons[3], buttons[4]);
-            (menu.speed, menu.generate, menu.shotsButton, menu.helpButton) = (buttons[5], buttons[6], buttons[7], buttons[8]);
+            (menu.speed, menu.generate, menu.shotsButton, menu.helpButton, menu.worldsButton) =
+                (buttons[5], buttons[6], buttons[7], buttons[8], buttons[9]);
             menu.help = AddHelpPanel(scene, origin, font, buttonPrefab);
             menu.shots = AddShotsPanel(scene, origin, font, buttonPrefab, tool, shot, locomotion);
+            menu.worlds = AddWorldsPanel(scene, origin, font, buttonPrefab, shot);
+        }
+
+        /// <summary>The scene picker: up to 12 world buttons (labels and layout set at runtime from the build list) + Close.</summary>
+        static WorldsPanel AddWorldsPanel(Scene scene, XROrigin origin, TMP_FontAsset font, GameObject buttonPrefab,
+                                          ShotRenderer shot)
+        {
+            var go = new GameObject("Worlds Panel");
+            SceneManager.MoveGameObjectToScene(go, scene);
+            var worldButtons = new PressableButton[12];
+            for (int i = 0; i <= worldButtons.Length; i++)
+            {
+                bool isClose = i == worldButtons.Length;
+                var btn = (GameObject)PrefabUtility.InstantiatePrefab(buttonPrefab, go.transform);
+                btn.name = isClose ? "Close" : $"World {i + 1}";
+                btn.transform.localPosition = new Vector3(0, WorldsPanel.Top - i * WorldsPanel.Step, -0.012f);
+                StyleButton(btn, isClose ? "Close" : btn.name);
+                if (isClose) go.AddComponent<WorldsPanel>().close = btn.GetComponent<PressableButton>();
+                else worldButtons[i] = btn.GetComponent<PressableButton>();
+            }
+            var panel = go.GetComponent<WorldsPanel>();
+            panel.worldButtons = worldButtons;
+            panel.origin = origin;
+            panel.shotRenderer = shot;
+            panel.font = font;
+            panel.backgroundMaterial = UnlitMaterial("PanelBlack", Color.black);
+            return panel;
         }
 
         // Hand menu grid: 128x32 mm buttons with 12 mm gaps (16 mm between columns); rows 0-3
-        // under the column headers, row 4 below a divider. Centered on the menu.
+        // under the column headers, rows 4-5 below a divider. Centered on the menu.
         const float MenuStep = 0.044f, MenuColumn = 0.144f, DividerGap = 0.016f;
-        const float MenuWidth = 2 * MenuColumn + 0.012f, MenuHeight = 0.264f;
-        const float MenuTop = 0.082f; // row 0
+        const float MenuWidth = 2 * MenuColumn + 0.012f, MenuHeight = 0.308f;
+        const float MenuTop = 0.104f; // row 0
         const float MenuHeaderY = MenuTop + 0.034f;
 
         internal static Vector3 MenuSlot(int col, int row) => new(
@@ -151,8 +179,8 @@ namespace VRDirector.Editor
         }
 
         /// <summary>
-        /// World state scenes: a World button in the menu's free slot (right column,
-        /// last row above the divider) and the <see cref="WorldStatePanel"/> it opens. Call after <see cref="Add"/>.
+        /// World state scenes: a World state button in the menu's free slot (next to Worlds,
+        /// below the divider) and the <see cref="WorldStatePanel"/> it opens. Call after <see cref="Add"/>.
         /// </summary>
         internal static void AddWorldMenu(Scene scene, XROrigin origin, WorldState world)
         {
@@ -170,20 +198,19 @@ namespace VRDirector.Editor
 
             var collection = menu.GetComponentsInChildren<Transform>(true).First(t => t.name == "ButtonCollection");
             var b = (GameObject)PrefabUtility.InstantiatePrefab(buttonPrefab, collection);
-            b.name = "World";
-            b.transform.localPosition = MenuSlot(1, 3);
-            StyleButton(b, "World");
+            b.name = "World state";
+            b.transform.localPosition = MenuSlot(1, 4);
+            StyleButton(b, "World state");
             SceneLayers.SetLayerRecursively(b, menu.gameObject.layer);
-            menu.worldButton = b.GetComponent<PressableButton>();
+            menu.worldStateButton = b.GetComponent<PressableButton>();
 
             var go = new GameObject("World Panel");
             SceneManager.MoveGameObjectToScene(go, scene);
-            // Top row: < scene, scene >, Close; SCENE row (3 toggles); REPLAY row (< run, play, run >, video).
+            // Close in the corner; SCENE row (3 toggles); REPLAY row (< run, play, run >, video).
+            // Switching scenes is the Worlds panel's job.
             const float w = WorldStatePanel.Width;
             (string label, Vector3 pos)[] layout =
             {
-                ("< Scene", new Vector3(-1.5f * MenuColumn, WorldStatePanel.TopRowY, -0.012f)),
-                ("Scene >", new Vector3(-0.5f * MenuColumn, WorldStatePanel.TopRowY, -0.012f)),
                 ("Generated: On", new Vector3(-MenuColumn, WorldStatePanel.SceneRowY, -0.012f)),
                 ("Color: Photo", new Vector3(0, WorldStatePanel.SceneRowY, -0.012f)),
                 ("Gravity: Off", new Vector3(MenuColumn, WorldStatePanel.SceneRowY, -0.012f)),
@@ -191,7 +218,7 @@ namespace VRDirector.Editor
                 ("Play", new Vector3(-0.5f * MenuColumn, WorldStatePanel.ReplayRowY, -0.012f)),
                 ("Run >", new Vector3(0.5f * MenuColumn, WorldStatePanel.ReplayRowY, -0.012f)),
                 ("Video: RGB", new Vector3(1.5f * MenuColumn, WorldStatePanel.ReplayRowY, -0.012f)),
-                ("Close", new Vector3(1.5f * MenuColumn, WorldStatePanel.TopRowY, -0.012f)),
+                ("Close", new Vector3(w / 2 - 0.08f, WorldStatePanel.Height / 2 - 0.035f, -0.012f)),
             };
             var bs = new PressableButton[layout.Length];
             for (int i = 0; i < layout.Length; i++)
@@ -212,10 +239,9 @@ namespace VRDirector.Editor
             panel.world = world;
             panel.font = font;
             panel.backgroundMaterial = UnlitMaterial("PanelBlack", Color.black);
-            (panel.prevScene, panel.nextScene) = (bs[0], bs[1]);
-            (panel.generated, panel.colors, panel.gravity) = (bs[2], bs[3], bs[4]);
-            (panel.prevRun, panel.replay, panel.nextRun, panel.layer, panel.close) = (bs[5], bs[6], bs[7], bs[8], bs[9]);
-            menu.world = panel;
+            (panel.generated, panel.colors, panel.gravity) = (bs[0], bs[1], bs[2]);
+            (panel.prevRun, panel.replay, panel.nextRun, panel.layer, panel.close) = (bs[3], bs[4], bs[5], bs[6], bs[7]);
+            menu.worldState = panel;
         }
 
         const string KeyboardPrefab ="Packages/org.mixedrealitytoolkit.uxcomponents/Experimental/NonNativeKeyboard/TouchableNonNativeKeyboard.prefab";

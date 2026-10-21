@@ -11,8 +11,8 @@ namespace VRDirector
     /// The MRTK hand menu on the left palm (turn the palm toward you; poke the buttons
     /// with the right index finger): New camera / Cancel, Undo, Clear all, Save,
     /// Reset position | Speed (Slow / Medium / Fast), Generate, Shots (browse, watch,
-    /// ride, edit, rename, delete; "Stop" while one plays), Help, and World (world state
-    /// scenes only).
+    /// ride, edit, rename, delete; "Stop" while one plays), Help, Worlds (scene picker)
+    /// and World state (world state scenes only).
     /// </summary>
     public class PathMenu : MonoBehaviour
     {
@@ -21,9 +21,11 @@ namespace VRDirector
         public VRLocomotion locomotion;
         public HelpPanel help;
         public ShotsPanel shots;
+        public WorldsPanel worlds;
         [Tooltip("Optional: only in scenes built with Build World State Scene.")]
-        public WorldStatePanel world;
-        public PressableButton newCamera, undo, clear, save, resetPosition, speed, generate, shotsButton, helpButton, worldButton;
+        public WorldStatePanel worldState;
+        public PressableButton newCamera, undo, clear, save, resetPosition, speed, generate, shotsButton, helpButton,
+                               worldsButton, worldStateButton;
 
         float savedAt = -10f;
 
@@ -41,15 +43,17 @@ namespace VRDirector
             clear.OnClicked.AddListener(tool.Clear);
             save.OnClicked.AddListener(() => { tool.Save(); savedAt = Time.time; });
             speed.OnClicked.AddListener(shot.CycleSpeed);
-            generate.OnClicked.AddListener(() => { help.Close(); shots.Close(); CloseWorld(); shot.Generate(); });
+            generate.OnClicked.AddListener(() => { CloseAll(); shot.Generate(); });
             shotsButton.OnClicked.AddListener(() =>
             {
                 if (shot.IsWatching || shot.IsRiding) shot.Stop();
-                else { help.Close(); CloseWorld(); shots.Toggle(); }
+                else { CloseAll(except: shots); shots.Toggle(); }
             });
-            helpButton.OnClicked.AddListener(() => { shots.Close(); CloseWorld(); help.Toggle(); });
-            if (worldButton != null && world != null)
-                worldButton.OnClicked.AddListener(() => { help.Close(); shots.Close(); world.Toggle(); });
+            helpButton.OnClicked.AddListener(() => { CloseAll(except: help); help.Toggle(); });
+            if (worldsButton != null && worlds != null)
+                worldsButton.OnClicked.AddListener(() => { CloseAll(except: worlds); worlds.Toggle(); });
+            if (worldStateButton != null && worldState != null)
+                worldStateButton.OnClicked.AddListener(() => { CloseAll(except: worldState); worldState.Toggle(); });
             resetPosition.OnClicked.AddListener(() => locomotion.ResetToSpawn());
         }
 
@@ -62,12 +66,18 @@ namespace VRDirector
             SetLabel(shotsButton, shot.IsWatching ? "Stop video" : shot.IsRiding ? "Stop ride"
                                   : shots.IsOpen ? "Close shots" : "Shots");
             SetLabel(helpButton, help.IsOpen ? "Close help" : "Help");
-            if (worldButton != null && world != null) SetLabel(worldButton, world.IsOpen ? "Close world" : "World");
+            if (worldsButton != null && worlds != null) SetLabel(worldsButton, worlds.IsOpen ? "Close worlds" : "Worlds");
+            if (worldStateButton != null && worldState != null)
+                SetLabel(worldStateButton, worldState.IsOpen ? "Close state" : "World state");
         }
 
-        void CloseWorld()
+        /// <summary>Closes every panel but <paramref name="except"/> (so a button toggles its own).</summary>
+        void CloseAll(Component except = null)
         {
-            if (world != null) world.Close();
+            if (except != help) help.Close();
+            if (except != shots) shots.Close();
+            if (worlds != null && except != worlds) worlds.Close();
+            if (worldState != null && except != worldState) worldState.Close();
         }
 
         /// <summary>Sets the text of an MRTK text button (not its icon glyph).</summary>

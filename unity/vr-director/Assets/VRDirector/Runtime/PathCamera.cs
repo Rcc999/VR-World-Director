@@ -65,7 +65,7 @@ namespace VRDirector
             previewCam.fieldOfView = VerticalFov;
             previewCam.aspect = Aspect;
             previewCam.nearClipPlane = 0.02f;
-            previewCam.farClipPlane = 50f;
+            previewCam.farClipPlane = 1000f; // Puffin worlds reach ~150 m (sky shell)
             previewCam.clearFlags = CameraClearFlags.SolidColor;
             previewCam.backgroundColor = Color.black;
             previewCam.cullingMask = SceneLayers.SceneMask; // the room only, like the final shot

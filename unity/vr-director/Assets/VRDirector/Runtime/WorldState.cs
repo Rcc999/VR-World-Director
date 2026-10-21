@@ -1,9 +1,7 @@
 using System;
-using System.Linq;
 using TMPro;
 using Unity.XR.CoreUtils;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.Video;
 
 namespace VRDirector
@@ -17,8 +15,8 @@ namespace VRDirector
     /// a gravity arrow + horizon ring at eye height, and replays of each camera run
     /// (RGB, depth, up-vector or latitude field) on a screen, with the frame's camera
     /// shown in the scene and its roll / pitch (scene, conditioned, measured).
-    /// Every world state is its own Unity scene in Assets/Scenes/WorldStates/;
-    /// <see cref="NextScene"/> loads the previous / next one that is in the build.
+    /// Every world state is its own Unity scene in Assets/Scenes/WorldStates/, switched
+    /// with the Worlds panel like every other world.
     /// </summary>
     public class WorldState : MonoBehaviour
     {
@@ -103,29 +101,8 @@ namespace VRDirector
             if (videoTexture != null) videoTexture.Release();
         }
 
-        // --- Switching world state scenes ------------------------------------------------
-
+        /// <summary>Folder of the world state scenes (listed in the Worlds panel with the other worlds).</summary>
         public const string ScenesFolder = "Assets/Scenes/WorldStates/";
-
-        /// <summary>The world state scenes enabled in the build, in build order.</summary>
-        public static string[] Scenes => Enumerable.Range(0, SceneManager.sceneCountInBuildSettings)
-            .Select(SceneUtility.GetScenePathByBuildIndex)
-            .Where(p => p.StartsWith(ScenesFolder)).ToArray();
-
-        public int SceneIndex => Array.IndexOf(Scenes, gameObject.scene.path);
-        public bool IsLoading { get; private set; }
-
-        public void NextScene(int step)
-        {
-            var scenes = Scenes;
-            if (IsLoading || scenes.Length < 2) return;
-            int i = ((Mathf.Max(0, SceneIndex) + step) % scenes.Length + scenes.Length) % scenes.Length;
-            IsLoading = true;
-            StopReplay();
-            SceneManager.LoadSceneAsync(scenes[i]); // the new scene brings its own rig, tools and menu
-        }
-
-        public static string SceneName(string path) => System.IO.Path.GetFileNameWithoutExtension(path);
 
         // --- Appearance / geometry ------------------------------------------------
 

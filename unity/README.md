@@ -16,6 +16,7 @@ built for the **Samsung Galaxy XR** (standalone Android build). Open that folder
 | `Editor/PlyImporter.cs` | Imports a `.ply` point cloud as a mesh (one square per point, optional per-point size). |
 | `Shaders/PointCloud.shader` | Draws those squares facing the viewer, in stereo. |
 | `Editor/PointCloudSceneBuilder.cs` | Menu **VR Director → Build Point Cloud Viewer Scene**. |
+| `Editor/PointCloudSceneBuilder.cs` → *Build Puffin World Scenes* | One scene per `.ply` in `PointClouds/Puffin/`; build = all worlds. |
 | `Editor/SplatSceneBuilder.cs` | Menu **VR Director → Build Gaussian Splat Viewer Scene**; also sets Vulkan-only and URP settings the splat renderer needs. |
 | `Editor/WorldStateSceneBuilder.cs` | Menu **VR Director → Build World State Scene** (see *World states* below). |
 | `Runtime/VRLocomotion.cs` | Moving around (added to the XR rig by both menus). |
@@ -29,20 +30,25 @@ full VR (no passthrough, black background) and make the new scene the only one i
 |---|---|---|
 | `PointClouds/Depth/` | `server/depth` | `Scenes/PointCloudViewer.unity` |
 | `PointClouds/SplatPoints/` | `server/splat_points` | `Scenes/PointCloudViewer.unity` |
-| `PointClouds/Puffin/` | Puffin-World on Euler (`front/` clouds, full outdoor, outdoor v2; Max Points 1M; camera paths in `data/puffin/`) | `Scenes/PointCloudViewer.unity` |
 | `PointClouds/LivingRoom/` | VGGT on 15 photos (Max Points 1M; cameras + top view in `data/livingroom/`) | `Scenes/PointCloudViewer.unity` |
 | `GaussianAssets/` | `server/splat_gaussians` | `Scenes/SplatViewer.unity` |
-| `WorldStates/<scene>/` | `server/world_state/to_unity.py` (Puffin world state export) | `Scenes/WorldStateViewer.unity` |
+| `PointClouds/Puffin/` (`Indoor`, `Plaza`, `Ruin` `.ply` + `.json`) | Puffin-World on Euler (`data/vrwd_scenes/front/`) | `Scenes/Puffin/Puffin-<Name>.unity` |
+| `PointClouds/Puffin/` (`IndoorWide`, `PlazaWide`, `RuinWide`) | New dense runs, ±105° + walk, 9M points each (`data/vrwd_scenes/v2/`) | `Scenes/Puffin/Puffin-<Name>Wide.unity` |
+| `Meshes/Puffin/<Name>/` (one `.obj` + `.png` per view) | `server/puffin_fusion/depth_mesh.py` | `Scenes/Puffin/Puffin-<Name>.unity` via *Build Puffin Mesh Worlds* |
+| `GaussianAssets/Puffin/` | `Indoor`, `Ruin`: points → Gaussians; `Plaza`: trained 3DGS test (streaky) | replaces the point version of `Puffin-<Name>` |
+| `WorldStates/<scene>/` | `server/world_state/to_unity.py` (Puffin world state export) | `Scenes/WorldStates/<scene>.unity` |
 
 **Point cloud:** copy the `.ply` into `Assets/PointClouds/...`, select it, run *Build Point Cloud Viewer Scene*.
 
 **World states** (Puffin's appearance / geometry / physics, `server/generation/WORLD_STATE.md`):
 1. `python -m world_state.to_unity <unzipped export> --unity ../unity/vr-director/Assets/WorldStates` (from `server/`).
-2. Select a folder in `Assets/WorldStates/` (e.g. `ruin`), run *VR Director → Build World State Scene*.
-3. In the headset: menu → **World**. *Generated* shows / hides Puffin's points (the real ones stay),
+2. *VR Director → Build All World State Scenes* (or select one folder in `Assets/WorldStates/` and run
+   *Build World State Scene*): `Scenes/WorldStates/<scene>.unity`, added to the build's worlds after the
+   room and the Puffin worlds, so **Worlds** in the hand menu switches to them.
+3. In the headset, in a world state scene: menu → **World state**. *Generated* shows / hides Puffin's points (the real ones stay),
    *Color* switches photo / height / depth colors, *Gravity* draws the down arrow and a horizon ring at
    eye height, *Replay* plays the selected run (*< Run / Run >*) on a screen with a pink frustum at that
-   frame's camera, and *Layer* switches it between RGB, depth, up-vector field and latitude field. Under the
+   frame's camera, and *Video* switches it between RGB, depth, up-vector field and latitude field. Above the
    screen: the frame's roll / pitch in the scene, what Puffin was told, and what it measured.
    Clouds are capped at 1M points each. Color modes are shader globals, so they also apply to rendered shots.
 
@@ -51,6 +57,30 @@ full VR (no passthrough, black background) and make the new scene the only one i
    output `Assets/GaussianAssets`, quality Low.
 2. Copy the matching `.transform.json` into `Assets/GaussianAssets/` (it places the splat).
 3. Select the new asset, run *Build Gaussian Splat Viewer Scene*, then *Build and Run*.
+
+**Puffin worlds:** the `.ply` files are already in Unity coordinates (meters, floor at y = 0, seed
+camera at (0, 1.5, 0) looking down +z), so no conversion is needed.
+1. Put them in `Assets/PointClouds/Puffin/` (`<Name>.ply`; the 3 from `data/vrwd_scenes/front/` are there).
+2. Run *VR Director → Build Puffin World Scenes*: one scene per cloud in `Scenes/Puffin/`.
+3. Rebuild the room too (*Build Gaussian Splat Viewer Scene*, above) so it gets the Worlds button.
+
+**Puffin worlds as Gaussians (smoother, no squares):** turn each cloud into round Gaussians with
+`server/splat_gaussians/points_to_gaussians.py` (see `server/README.md`), then run
+*VR Director → Build Puffin Splat Worlds*: every `server/outputs/puffin_splats/<Name>.ply` becomes a
+splat asset (Low quality, like the room) in `Assets/GaussianAssets/Puffin/` and replaces the point
+version of `Scenes/Puffin/Puffin-<Name>.unity` (same scene name, so its cameras and shots stay).
+*Build Puffin World Scenes* puts the points back.
+
+**Puffin worlds as textured meshes (sharpest):** `server/puffin_fusion/depth_mesh.py --out
+Assets/Meshes/Puffin/<Name>Mesh` (see `server/README.md`), then *VR Director → Build Puffin Mesh
+Worlds*: one scene per folder, `Scenes/Puffin/Puffin-<Name>Mesh.unity`, each view unlit with its
+image (Puffin's pixels already hold the lighting) and drawn from both sides. The headset, preview
+and shot cameras draw up to 1000 m, so the 150 m sky and the dome are not cut off.
+
+Both menus set the build to **all worlds**: the 3DGS room first (opens at start), then the Puffin
+scenes. Switch between them in the headset with *Worlds*. If a world stutters, select its `.ply`
+and set *Max Points* (e.g. 500000) on the importer. The *Wide* worlds use all 9M points (≈1 GB of
+mesh, fine in the editor); set *Max Points* (e.g. 2000000) on them before a headset build.
 
 ## Controls in the headset (hands, no controllers)
 
@@ -62,11 +92,12 @@ full VR (no passthrough, black background) and make the new scene the only one i
 | New camera | Menu → *New camera*: it sits in your right hand with a live preview; aim, then pinch to place |
 | Edit a camera | Pinch it, move or rotate your hand (it never rolls, so the horizon stays level) |
 | Undo / Clear all / Reset position | Menu buttons |
-| Save | Menu → *Save*: cameras go to `camera_path.json` on the headset and load back at start |
+| Save | Menu → *Save*: cameras go to `camera_path_<scene>.json` on the headset (one per world) and load back at start |
 | Speed | Menu → *Speed*: Slow / Medium / Fast = 0.25 / 0.5 / 1 m/s along the path |
 | Generate | Menu → *Generate*: renders a new shot along the path (1280×720, 30 fps PNGs + `shot.json`). Meanwhile you wait in an empty black space with only the progress screen, and nothing can be touched. Then you are back at the start position with your cameras; watch it from *Shots* |
 | Shots | Menu → panel with this scene's shots, one at a time (*< Prev / Next >*):<br>• *Watch*: the video (its saved frames) on a screen<br>• *Ride*: your head follows the shot's path (position and turns; up/down stays yours), seeing only the room; you end at the start<br>• *Edit*: back to the start with that shot's cameras; *Generate* then makes a **new** shot, the old one is kept<br>• *Rename*: touch keyboard · *Delete*: press twice<br>While a shot plays, the menu button reads *Stop video* / *Stop ride* |
 | Help | Menu → panel listing all gestures and buttons; it also opens when the app starts |
+| Worlds | Menu → scene picker (up to 8): Room 3DGS and the Puffin worlds (Indoor, Plaza, Ruin, and their *Wide* versions). Each world keeps its own cameras and shots |
 
 Shots are numbered like takes: **shot1, shot2…** per scene (a deleted number is never reused); the
 default name is `shot<N>`. On the headset: `Shots/<scene>/<date>/` with `frame_*.png` + `shot.json`
@@ -75,7 +106,7 @@ default name is `shot<N>`. On the headset: `Shots/<scene>/<date>/` with `frame_*
 The video shows only the room: the room is on the **Scene** layer, and the shot and preview cameras render only that layer (no hands, menu, screen, camera models or path).
 
 Cameras are numbered in placement order and joined by the path line.
-Code: `Runtime/VRLocomotion.cs`, `HandInput.cs`, `CameraPathTool.cs`, `PathCamera.cs`, `ShotRenderer.cs`, `ShotLibrary.cs`, `ShotsPanel.cs`, `PathMenu.cs`, `HelpPanel.cs`, `WorldState.cs`, `WorldStatePanel.cs`.
+Code: `Runtime/VRLocomotion.cs`, `HandInput.cs`, `CameraPathTool.cs`, `PathCamera.cs`, `ShotRenderer.cs`, `ShotLibrary.cs`, `ShotsPanel.cs`, `PathMenu.cs`, `HelpPanel.cs`, `WorldsPanel.cs`, `WorldState.cs`, `WorldStatePanel.cs`.
 To get a shot onto the Mac as MP4: `server/shots/pull_shot.sh` (see `server/README.md`).
 
 The splat package is embedded in `vr-director/Packages/org.nesnausk.gaussian-splatting/` with two

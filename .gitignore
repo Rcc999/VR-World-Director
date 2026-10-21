@@ -31,3 +31,19 @@ unity/**/*_BackUpThisFolder_ButDontShipItWithYourGame/
 .DS_Store
 .idea/
 .vscode/
+
+# Puffin-World runs (raw frames/depths, dense clouds: ~1 GB, regenerable on Euler); worlds used are in Unity Assets
+data/vrwd_scenes/*
+!data/vrwd_scenes/README.txt
+
+# Puffin worlds (point clouds, splats, scenes; ~500 MB): regenerate with the VR Director menus,
+# see unity/README.md and data/vrwd_scenes/README.txt
+unity/vr-director/Assets/PointClouds/Puffin/
+unity/vr-director/Assets/PointClouds/Puffin.meta
+unity/vr-director/Assets/GaussianAssets/Puffin/
+unity/vr-director/Assets/GaussianAssets/Puffin.meta
+unity/vr-director/Assets/Scenes/Puffin/
+unity/vr-director/Assets/Scenes/Puffin.meta
+unity/vr-director/Assets/Meshes/Puffin/
+unity/vr-director/Assets/Meshes/Puffin.meta
+unity/vr-director/Assets/Meshes.meta
