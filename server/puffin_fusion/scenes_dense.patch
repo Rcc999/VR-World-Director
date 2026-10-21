@@ -1,6 +1,18 @@
---- a/server/generation/scenes.py	2026-10-21 11:13:53
-+++ b/server/generation/scenes.py	2026-10-21 11:13:53
-@@ -20,6 +20,14 @@
+diff --git a/server/generation/scenes.py b/server/generation/scenes.py
+index d665862..cbd39ba 100644
+--- a/server/generation/scenes.py
++++ b/server/generation/scenes.py
+@@ -3,6 +3,9 @@
+ Short camera runs out of the seed view, all generated with depth:
+   left / right  turn in place about the gravity up-axis Puffin estimates
+   walk          move forward along the horizontal view direction
++  strafe_l / strafe_r   slide sideways, looking ahead (parallax, --runs)
++  orbit_l / orbit_r     circle around the point the seed view looks at
++                        (parallax around the centre of the scene, --runs)
+ Each run is its own short autoregressive chain from the seed: one long
+ 360-degree chain (11 chunks) drifted into invented places and faded to black
+ after ~3 chunks, while short chains at CFG 2 hold (sweep_drift.py, 2026-10-21:
+@@ -20,6 +23,14 @@ run: re-fuse without regenerating via --fuse_only).
  
      python -m generation.scenes indoor --image photo.jpg
      python -m generation.scenes text --prompt "A sunlit Japanese garden ..."
@@ -15,7 +27,22 @@
  """
  import argparse
  import json
-@@ -65,6 +73,17 @@
+@@ -60,11 +71,32 @@ def parse_args():
+     p.add_argument('--walk_step', type=float, default=0.04,
+                    help='forward step per view as a fraction of the seed '
+                         "view's median depth")
++    p.add_argument('--runs', nargs='+', default=['left', 'right', 'walk'],
++                   choices=('left', 'right', 'walk', 'strafe_l', 'strafe_r', 'orbit_l', 'orbit_r'),
++                   help='camera runs, each from the seed view (the first sets the depth scale)')
++    p.add_argument('--strafe_chunks', type=int, default=2)
++    p.add_argument('--strafe_step', type=float, default=0.03,
++                   help='sideways step per view, fraction of the seed view median depth')
++    p.add_argument('--orbit_chunks', type=int, default=2)
++    p.add_argument('--orbit_deg_per_view', type=float, default=2.0)
++    p.add_argument('--orbit_radius', type=float, default=0.6,
++                   help='orbit centre distance, fraction of the seed view median depth')
+     p.add_argument('--camera_height', type=float, default=1.5,
+                    help='meters between the seed camera and the floor')
      p.add_argument('--seed', type=int, default=42)
      p.add_argument('--quick', action='store_true',
                     help='smoke test: 10 steps, one chunk per run')
@@ -33,7 +60,106 @@
      return p.parse_args()
  
  
-@@ -183,7 +202,7 @@
+@@ -105,6 +137,36 @@ def walk_poses(n, step, up):
+     return poses
+ 
+ 
++def strafe_poses(n, step, up):
++    """Slide along the horizontal camera right axis (step < 0 = left)."""
++    right = np.array([1.0, 0.0, 0.0])
++    right = right - (right @ up) * up
++    right /= np.linalg.norm(right)
++    poses = []
++    for i in range(n):
++        P = np.eye(4)
++        P[:3, 3] = right * step * i
++        poses.append(P)
++    return poses
++
++
++def orbit_poses(n, deg_per_view, radius, up):
++    """Turn the seed camera about the vertical axis through a point `radius`
++    ahead of it: the camera circles that point and keeps looking at it."""
++    fwd = np.array([0.0, 0.0, 1.0])
++    fwd = fwd - (fwd @ up) * up
++    fwd /= np.linalg.norm(fwd)
++    c = fwd * radius
++    poses = []
++    for i in range(n):
++        R = rotation(up, math.radians(deg_per_view * i))
++        P = np.eye(4)
++        P[:3, :3] = R
++        P[:3, 3] = c - R @ c
++        poses.append(P)
++    return poses
++
++
+ def chunks_for(views_needed, num_views=8):
+     return max(1, math.ceil((views_needed - 1) / (num_views - 1)))
+ 
+@@ -150,24 +212,38 @@ def generate_scene(args, out):
+     n_walk = 1 if args.quick else args.walk_chunks
+     turn_views = pr.views_for_chunks(n_turn)
+     raw = dict(K=K, cam=np.asarray(cam), up=up)
+-    plan = [('left', lambda: pan_poses(turn_views, -args.deg_per_view, up)),
+-            ('right', lambda: pan_poses(turn_views, args.deg_per_view, up)),
+-            # walk step needs a depth scale: the first run's seed-view depth
+-            ('walk', lambda: walk_poses(pr.views_for_chunks(n_walk), step, up))]
+-    step = None
++    n_strafe = 1 if args.quick else args.strafe_chunks
++    n_orbit = 1 if args.quick else args.orbit_chunks
++    # Moving runs need a depth scale: the median of the first run's seed-view
++    # depth (in Puffin's depth units, like the poses).
++    makers = {
++        'left': lambda D: pan_poses(turn_views, -args.deg_per_view, up),
++        'right': lambda D: pan_poses(turn_views, args.deg_per_view, up),
++        'walk': lambda D: walk_poses(pr.views_for_chunks(n_walk), args.walk_step * D, up),
++        'strafe_l': lambda D: strafe_poses(pr.views_for_chunks(n_strafe), -args.strafe_step * D, up),
++        'strafe_r': lambda D: strafe_poses(pr.views_for_chunks(n_strafe), args.strafe_step * D, up),
++        'orbit_l': lambda D: orbit_poses(pr.views_for_chunks(n_orbit), -args.orbit_deg_per_view,
++                                         args.orbit_radius * D, up),
++        'orbit_r': lambda D: orbit_poses(pr.views_for_chunks(n_orbit), args.orbit_deg_per_view,
++                                         args.orbit_radius * D, up),
++    }
++    if args.runs[0] not in ('left', 'right'):
++        raise SystemExit('--runs must start with left or right (sets the depth scale)')
++    plan = [(r, makers[r]) for r in args.runs]
++    D = None
+     for name, make_poses in plan:
+-        if name == 'walk':
+-            d0 = raw['left_depths'][0].astype(np.float32)
+-            step = args.walk_step * float(np.median(d0[d0 > 0]))
+-        poses = make_poses()
++        if D is None and f'{args.runs[0]}_depths' in raw:
++            d0 = raw[f'{args.runs[0]}_depths'][0].astype(np.float32)
++            D = float(np.median(d0[d0 > 0]))
++        poses = make_poses(D)
+         frames, depths = run_path(pr, model, seed_img, poses, K, cam, args)
+         raw.update({f'{name}_frames': frames, f'{name}_depths': depths.astype(np.float16),
+                     f'{name}_poses': np.stack(poses[:len(frames)])})
+         raw['runs'] = np.array([n for n, _ in plan if f'{n}_frames' in raw])
+         np.savez_compressed(out / 'raw.npz', **raw)    # keep finished runs if a later one fails
+         save_frames_as_mp4(list(frames), str(out / f'{name}.mp4'), fps=8)
+-        print(f"{name}: {len(frames)} views" + (f", step {step:.4f} (depth units)"
+-              if name == 'walk' else f", {(len(frames) - 1) * args.deg_per_view:.0f} deg"),
++        moved = np.linalg.norm(poses[len(frames) - 1][:3, 3])
++        print(f"{name}: {len(frames)} views, moved {moved:.3f} (depth units, median depth {D})",
+               flush=True)
+ 
+     (out / 'meta.json').write_text(json.dumps(dict(
+@@ -175,7 +251,10 @@ def generate_scene(args, out):
+         source=args.image or args.prompt, model=args.model,
+         num_steps=args.num_steps, cfg_scale=args.cfg_scale,
+         deg_per_view=args.deg_per_view, turn_chunks=n_turn, walk_chunks=n_walk,
+-        walk_step=args.walk_step, seed=args.seed), indent=1))
++        walk_step=args.walk_step, runs=args.runs, strafe_chunks=n_strafe,
++        strafe_step=args.strafe_step, orbit_chunks=n_orbit,
++        orbit_deg_per_view=args.orbit_deg_per_view, orbit_radius=args.orbit_radius,
++        seed=args.seed), indent=1))
+     del model
+     torch.cuda.empty_cache()
+ 
+@@ -183,7 +262,7 @@ def generate_scene(args, out):
  # ---------------------------------------------------------------------------
  # fusion -> Unity
  # ---------------------------------------------------------------------------
@@ -42,7 +168,7 @@
      """Upstream fusion for one run; returns OpenCV-frame points + colors."""
      import torch
      import trimesh
-@@ -193,7 +212,9 @@
+@@ -193,7 +272,9 @@ def fuse_run(frames, depths, poses, K, glb_path):
      tens = [torch.from_numpy(f).permute(2, 0, 1).float() / 127.5 - 1.0 for f in frames]
      export_reconstruction_glb(tens, [d.astype(np.float64) for d in depths],
                                [np.array2string(p) for p in poses],
@@ -53,7 +179,7 @@
      cloud = next(g for g in trimesh.load(glb_path).geometry.values()
                   if isinstance(g, trimesh.PointCloud))
      # export_reconstruction_glb flips OpenCV -> glTF with diag(1, -1, -1).
-@@ -218,14 +239,16 @@
+@@ -218,14 +299,16 @@ def fuse_scene(args, out):
      runs = [str(r) for r in raw['runs']] if 'runs' in raw else ['pan', 'walk']
      # Every run generates the seed view's depth: put each on the first run's
      # scale (the walk's poses were laid out in those depth units).
@@ -73,7 +199,7 @@
      pts = opencv_to_unity(np.concatenate([c[0] for c in clouds]))
      rgb = np.concatenate([c[1] for c in clouds])
  
-@@ -242,10 +265,10 @@
+@@ -242,10 +325,10 @@ def fuse_scene(args, out):
      pts, R, cam_height = level_to_floor(pts, normal, d)
      scale = args.camera_height / cam_height
      pts *= scale
@@ -86,7 +212,7 @@
              for tag in runs}
      meta = json.loads((out / 'meta.json').read_text())
      meta.update(
-@@ -253,16 +276,18 @@
+@@ -253,16 +336,18 @@ def fuse_scene(args, out):
          floor_vs_gravity_deg=round(tilt, 2),
          estimated_camera_height=float(cam_height), scale_to_meters=float(scale),
          camera_height_m=args.camera_height,

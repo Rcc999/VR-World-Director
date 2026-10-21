@@ -13,7 +13,7 @@ a large NVIDIA GPU that we do not have yet, so for now we test the rest of the p
 | Depth | 1 photo | Works, but you only see the ~57° the photo covers | `server/depth/` |
 | Splat as points | ~1 min of video | Full 360° room, but looks pixelated (opaque squares) | `server/splat_points/` |
 | **Splat as Gaussians** | ~1 min of video | **Full 360° room, realistic** | `server/splat_gaussians/` |
-| **Puffin-World** | 1 photo or a text prompt | 3 worlds (indoor, plaza, ruin). Best: *Wide* versions, ±105° + a walk, 9M dense points. Still coarse (Puffin renders 640 px views) | run on Euler (`server/README.md`, *Puffin-World worlds*) |
+| **Puffin-World** | 1 photo or a text prompt | 3 worlds (indoor, plaza, ruin), ±105° + a walk. Best so far: **textured depth meshes** + a 360° dome (sharp from the start spot; holes and smears when you walk away). Next: runs with sideways motion + depth-guided 3DGS | run on Euler (`server/README.md`, *Puffin-World worlds*) |
 
 The two splat approaches share capture → camera poses (COLMAP) → training (Brush):
 `server/splat_train/`.

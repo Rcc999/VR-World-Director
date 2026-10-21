@@ -94,6 +94,12 @@ sbatch -J scene-plaza generation/slurm/scene.sbatch text --prompt "..." \
 → `outputs/scenes/<name>/scene_unity_dense.ply` (+ `raw.npz`, videos). Copy it to
 `Assets/PointClouds/Puffin/<Name>Wide.ply` and run *Build Puffin World Scenes* (`unity/README.md`).
 
+**Runs with parallax** (for walking around and for 3DGS): the patch also adds camera runs that move,
+not only turn. `--runs left right strafe_l strafe_r orbit_l orbit_r walk`: `strafe_*` slides
+sideways (0.03 × scene depth per view), `orbit_*` circles the point the seed view looks at
+(2°/view). Each run starts from the seed view. About 120 views → ~3 h on an A100 (one job per
+world, they run in parallel).
+
 **Re-fuse an existing run on the Mac** (CPU, minutes, needs `raw.npz` + `meta.json`):
 
 ```bash
@@ -102,8 +108,38 @@ sbatch -J scene-plaza generation/slurm/scene.sbatch text --prompt "..." \
 ```
 `--keep_views RUN=N` keeps only the first N views of a run (e.g. before a long pan drifts).
 
-**Experiment, trained 3DGS on Puffin's views (not recommended):** `to_3dgs_dataset.py` writes a
+**First 3DGS experiment (superseded by the depth-guided training below):** `to_3dgs_dataset.py` writes a
 COLMAP dataset from Puffin's own cameras (optionally 4× Real-ESRGAN, weights in
 `tools/upscale/RealESRGAN_x4plus.pth`), then `splat_train/train_brush.sh`. Result: streaks.
 The views mostly turn in place, so there is no parallax and the Gaussians become thin needles.
 Dense points or `points_to_gaussians.py` (above) look better.
+
+**Textured depth meshes (best look so far):** every pixel of a Puffin view is pushed out to its
+depth and neighbors are joined into triangles, textured with the view's image. Per world:
+- ~13 views (every 20° of the turns, middle 80 % of each, so neighbors overlap and hide seams);
+- cut where the depth jumps > 15 %, with a backdrop patch behind each cut (background color
+  instead of black when you look behind an edge); sky on a shell at 150 m;
+- a 360° dome at 170 m painted from all views, gaps filled with blurred sky / ground colors;
+- same scale and frame as the dense cloud (they overlap within ~2 cm). ~1.8M triangles, seconds
+  on the Mac (`--upscale`: 4× Real-ESRGAN textures).
+
+```bash
+.venv/bin/python -m puffin_fusion.depth_mesh ../data/vrwd_scenes/v2/text ../data/vrwd_scenes/v2/text/scene_dense.json \
+    --out ../unity/vr-director/Assets/Meshes/Puffin/PlazaMesh
+```
+Then Unity: *VR Director → Build Puffin Mesh Worlds*.
+
+**Depth-guided 3DGS (Euler, in progress):** `puffin_fusion/train_3dgs.py` trains a splat with
+gsplat on every view of a parallax run, starting from the dense points (+ a sky shell), with
+an image loss, a loss against Puffin's depth (keeps the Gaussians on surfaces) and a penalty on
+needle-shaped Gaussians. Output in the W frame (Unity with y flipped) + `.transform.json`
+(scale (1, -1, 1)), then into Unity like the room (*Create GaussianSplatAsset*).
+
+```bash
+# once: gsplat into scratch (its CUDA code compiles on the first run)
+apptainer exec --bind $SCRATCH --env UV_CACHE_DIR=$SCRATCH/.uvcache $SCRATCH/vrwd-puffin.sif \
+    $SCRATCH/bin/uv pip install --python /opt/venv/bin/python --target $SCRATCH/gsplat_lib --no-deps \
+    gsplat==1.5.3 jaxtyping wadler-lindig
+# per world (from server/, after its scene job)
+sbatch -J 3dgs-plaza puffin_fusion/train_3dgs.sbatch outputs/scenes/plaza3d --out outputs/splats/Plaza3D.ply
+```

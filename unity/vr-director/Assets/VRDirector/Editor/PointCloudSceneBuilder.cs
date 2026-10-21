@@ -129,6 +129,7 @@ namespace VRDirector.Editor
                 {
                     origin.Camera.clearFlags = CameraClearFlags.SolidColor;
                     origin.Camera.backgroundColor = Color.black; // alpha 1: no passthrough
+                    origin.Camera.farClipPlane = 1000f; // Puffin skies sit ~150 m away
                 }
                 // ARCameraManager turns on camera passthrough on Android XR, and MRTK's
                 // CameraSettingsManager overwrites the clear color at startup.

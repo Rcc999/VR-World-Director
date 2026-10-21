@@ -32,6 +32,7 @@ full VR (no passthrough, black background) and make the new scene the only one i
 | `GaussianAssets/` | `server/splat_gaussians` | `Scenes/SplatViewer.unity` |
 | `PointClouds/Puffin/` (`Indoor`, `Plaza`, `Ruin` `.ply` + `.json`) | Puffin-World on Euler (`data/vrwd_scenes/front/`) | `Scenes/Puffin/Puffin-<Name>.unity` |
 | `PointClouds/Puffin/` (`IndoorWide`, `PlazaWide`, `RuinWide`) | New dense runs, ±105° + walk, 9M points each (`data/vrwd_scenes/v2/`) | `Scenes/Puffin/Puffin-<Name>Wide.unity` |
+| `Meshes/Puffin/<Name>/` (one `.obj` + `.png` per view) | `server/puffin_fusion/depth_mesh.py` | `Scenes/Puffin/Puffin-<Name>.unity` via *Build Puffin Mesh Worlds* |
 | `GaussianAssets/Puffin/` | `Indoor`, `Ruin`: points → Gaussians; `Plaza`: trained 3DGS test (streaky) | replaces the point version of `Puffin-<Name>` |
 
 **Point cloud:** copy the `.ply` into `Assets/PointClouds/...`, select it, run *Build Point Cloud Viewer Scene*.
@@ -54,6 +55,12 @@ camera at (0, 1.5, 0) looking down +z), so no conversion is needed.
 splat asset (Low quality, like the room) in `Assets/GaussianAssets/Puffin/` and replaces the point
 version of `Scenes/Puffin/Puffin-<Name>.unity` (same scene name, so its cameras and shots stay).
 *Build Puffin World Scenes* puts the points back.
+
+**Puffin worlds as textured meshes (sharpest):** `server/puffin_fusion/depth_mesh.py --out
+Assets/Meshes/Puffin/<Name>Mesh` (see `server/README.md`), then *VR Director → Build Puffin Mesh
+Worlds*: one scene per folder, `Scenes/Puffin/Puffin-<Name>Mesh.unity`, each view unlit with its
+image (Puffin's pixels already hold the lighting) and drawn from both sides. The headset, preview
+and shot cameras draw up to 1000 m, so the 150 m sky and the dome are not cut off.
 
 Both menus set the build to **all worlds**: the 3DGS room first (opens at start), then the Puffin
 scenes. Switch between them in the headset with *Worlds*. If a world stutters, select its `.ply`
