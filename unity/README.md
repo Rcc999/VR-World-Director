@@ -17,6 +17,7 @@ built for the **Samsung Galaxy XR** (standalone Android build). Open that folder
 | `Shaders/PointCloud.shader` | Draws those squares facing the viewer, in stereo. |
 | `Editor/PointCloudSceneBuilder.cs` | Menu **VR Director → Build Point Cloud Viewer Scene**. |
 | `Editor/SplatSceneBuilder.cs` | Menu **VR Director → Build Gaussian Splat Viewer Scene**; also sets Vulkan-only and URP settings the splat renderer needs. |
+| `Editor/WorldStateSceneBuilder.cs` | Menu **VR Director → Build World State Scene** (see *World states* below). |
 | `Runtime/VRLocomotion.cs` | Moving around (added to the XR rig by both menus). |
 
 Both menus copy `HelloCube.unity` (the working XR rig), put the scene at the origin, switch to
@@ -28,9 +29,22 @@ full VR (no passthrough, black background) and make the new scene the only one i
 |---|---|---|
 | `PointClouds/Depth/` | `server/depth` | `Scenes/PointCloudViewer.unity` |
 | `PointClouds/SplatPoints/` | `server/splat_points` | `Scenes/PointCloudViewer.unity` |
+| `PointClouds/Puffin/` | Puffin-World on Euler (`front/` clouds, full outdoor, outdoor v2; Max Points 1M; camera paths in `data/puffin/`) | `Scenes/PointCloudViewer.unity` |
+| `PointClouds/LivingRoom/` | VGGT on 15 photos (Max Points 1M; cameras + top view in `data/livingroom/`) | `Scenes/PointCloudViewer.unity` |
 | `GaussianAssets/` | `server/splat_gaussians` | `Scenes/SplatViewer.unity` |
+| `WorldStates/<scene>/` | `server/world_state/to_unity.py` (Puffin world state export) | `Scenes/WorldStateViewer.unity` |
 
 **Point cloud:** copy the `.ply` into `Assets/PointClouds/...`, select it, run *Build Point Cloud Viewer Scene*.
+
+**World states** (Puffin's appearance / geometry / physics, `server/generation/WORLD_STATE.md`):
+1. `python -m world_state.to_unity <unzipped export> --unity ../unity/vr-director/Assets/WorldStates` (from `server/`).
+2. Select a folder in `Assets/WorldStates/` (e.g. `ruin`), run *VR Director → Build World State Scene*.
+3. In the headset: menu → **World**. *Generated* shows / hides Puffin's points (the real ones stay),
+   *Color* switches photo / height / depth colors, *Gravity* draws the down arrow and a horizon ring at
+   eye height, *Replay* plays the selected run (*< Run / Run >*) on a screen with a pink frustum at that
+   frame's camera, and *Layer* switches it between RGB, depth, up-vector field and latitude field. Under the
+   screen: the frame's roll / pitch in the scene, what Puffin was told, and what it measured.
+   Clouds are capped at 1M points each. Color modes are shader globals, so they also apply to rendered shots.
 
 **Gaussian splat:**
 1. *Tools → Gaussian Splats → Create GaussianSplatAsset*: input the `.ply` from `splat_for_unity`,
@@ -61,7 +75,7 @@ default name is `shot<N>`. On the headset: `Shots/<scene>/<date>/` with `frame_*
 The video shows only the room: the room is on the **Scene** layer, and the shot and preview cameras render only that layer (no hands, menu, screen, camera models or path).
 
 Cameras are numbered in placement order and joined by the path line.
-Code: `Runtime/VRLocomotion.cs`, `HandInput.cs`, `CameraPathTool.cs`, `PathCamera.cs`, `ShotRenderer.cs`, `ShotLibrary.cs`, `ShotsPanel.cs`, `PathMenu.cs`, `HelpPanel.cs`.
+Code: `Runtime/VRLocomotion.cs`, `HandInput.cs`, `CameraPathTool.cs`, `PathCamera.cs`, `ShotRenderer.cs`, `ShotLibrary.cs`, `ShotsPanel.cs`, `PathMenu.cs`, `HelpPanel.cs`, `WorldState.cs`, `WorldStatePanel.cs`.
 To get a shot onto the Mac as MP4: `server/shots/pull_shot.sh` (see `server/README.md`).
 
 The splat package is embedded in `vr-director/Packages/org.nesnausk.gaussian-splatting/` with two

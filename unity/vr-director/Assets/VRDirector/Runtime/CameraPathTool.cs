@@ -15,8 +15,9 @@ namespace VRDirector
     /// - Placed cameras are numbered 1, 2, 3... in order and joined by a smooth path
     ///   (Catmull-Rom); pinch one to move or rotate it.
     /// - <see cref="Undo"/> removes the last camera, <see cref="Clear"/> all of them.
-    /// - <see cref="Save"/> writes them to &lt;persistentDataPath&gt;/camera_path.json;
-    ///   they are loaded back when the app starts.
+    /// - <see cref="Save"/> writes them to &lt;persistentDataPath&gt;/&lt;saveName&gt;.json
+    ///   (camera_path.json, or one file per world state scene); they are loaded back
+    ///   when the scene starts.
     /// </summary>
     public class CameraPathTool : MonoBehaviour
     {
@@ -46,7 +47,10 @@ namespace VRDirector
             public SavedCamera[] cameras;
         }
 
-        public static string SavePath => Path.Combine(Application.persistentDataPath, "camera_path.json");
+        [Tooltip("File name (no extension) in persistentDataPath; world state scenes get their own.")]
+        public string saveName = "camera_path";
+
+        public string SavePath => Path.Combine(Application.persistentDataPath, saveName + ".json");
 
         readonly List<PathCamera> cameras = new();
         PathCamera held;
