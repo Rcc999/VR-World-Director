@@ -22,14 +22,22 @@ camera-control accuracy, evaluation (ii)).
 
 ## Point clouds (toggle real / generated)
 
-Same frame as every other cloud: Unity axes, meters, floor at y = 0, seed
-camera at (0, camera height, 0) looking down +z.
+`world_state/clouds/`, listed in `world_state.json` under `clouds` (role ->
+file, point count, voxel size). Only these ship; the scene folder's raw,
+full-density clouds are not part of the package.
 
-| Scene kind | Files |
+| Role | Content |
 |---|---|
-| one seed (`ruin`, `indoor`, `plaza` v2) | `scene_unity.ply` = `photo.ply` (the seed view) + `generated.ply` |
-| photos + Puffin (`livingroom-real`) | `full_2cm.ply` / `full_3cm.ply`; `real_unity.ply` (photos only) + `generated.ply` |
-| video only (`livingroom-video`) | `video_2cm.ply` / `video_3cm.ply` (all real) |
+| `full.ply` | real + generated |
+| `real.ply` | the photo(s) / video frames only (for one-seed scenes: the seed view) |
+| `generated.ply` | Puffin's generated content only (absent for video-only scenes) |
+
+All are merged into 2 cm cells (headset-sized) and share one frame: Unity
+axes, meters, floor at y = 0, first camera at (0, camera height, 0) looking
+down +z. One-seed scenes are leveled with Puffin's gravity (the up the
+images were generated with) and the floor is the ground around the camera;
+`floor_vs_gravity_deg` in `scene.json` is a whole-scene RANSAC floor kept
+only as a diagnostic (sloped terrain makes it unreliable).
 
 Height / depth coloring needs no extra data: a shader mode on `position.y`
 (height above floor) or distance to the viewer.
@@ -41,7 +49,7 @@ Height / depth coloring needs no extra data: a shader mode on `position.y`
   "kind": "single" | "multiseed" | "real",
   "gravity_unity": [0, -1, 0],            // scene is leveled: gravity is straight down
   "caption": "...",                        // Puffin's description of the scene
-  "clouds": ["scene_unity.ply", ...],     // which of the files above exist
+  "clouds": {"full": {"file": "clouds/full.ply", "points": 812345, "voxel_m": 0.02}, "real": {...}, "generated": {...}},
   "runs": {
     "<run>": {                             // e.g. "left", "right", "walk", "IMG_7017-left", "real"
       "generated": true,

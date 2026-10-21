@@ -191,14 +191,34 @@ def fuse_run(frames, depths, poses, K, glb_path):
     from scripts.evaluation.modules.reconstruction import export_reconstruction_glb
 
     tens = [torch.from_numpy(f).permute(2, 0, 1).float() / 127.5 - 1.0 for f in frames]
+    Path(glb_path).unlink(missing_ok=True)
     export_reconstruction_glb(tens, [d.astype(np.float64) for d in depths],
                               [np.array2string(p) for p in poses],
-                              [np.array2string(K)] * len(poses), str(glb_path))
+                              [np.array2string(K)] * len(poses), str(glb_path),
+                              # one view has no second view to confirm a voxel
+                              voxel_min_pts=1 if len(frames) == 1 else 2)
+    if not Path(glb_path).exists():               # upstream skips when nothing survives
+        return np.zeros((0, 3)), np.zeros((0, 3), np.uint8)
     cloud = next(g for g in trimesh.load(glb_path).geometry.values()
                  if isinstance(g, trimesh.PointCloud))
     # export_reconstruction_glb flips OpenCV -> glTF with diag(1, -1, -1).
     pts = np.asarray(cloud.vertices) @ np.diag([1.0, -1.0, -1.0])
     return pts, np.asarray(cloud.colors)[:, :3]
+
+
+def ground_height(pts, up, near_pct=25.0):
+    """Height (along up, camera at 0) of the ground around the camera: the
+    densest height band below the camera among the points nearest to it
+    horizontally."""
+    h = pts @ up
+    below = h < 0
+    r = np.linalg.norm(pts - np.outer(h, up), axis=1)
+    near = below & (r < np.percentile(r[below], near_pct))
+    hn = h[near]
+    span = float(np.percentile(hn, 95) - np.percentile(hn, 5))
+    hist, edges = np.histogram(hn, bins=max(20, int(span / (0.01 * abs(np.median(hn)) + 1e-9))))
+    i = int(np.argmax(hist))
+    return float((edges[i] + edges[i + 1]) / 2)
 
 
 def to_unity_pose(c2w, R_level, d, scale):
@@ -234,16 +254,25 @@ def fuse_scene(args, out):
     pts = opencv_to_unity(np.concatenate([c[0] for c in clouds]))
     rgb = np.concatenate([c[1] for c in clouds])
 
-    up_unity = opencv_to_unity(raw['up'][None])[0]
+    # Level with Puffin's gravity: the seed's up the images were generated
+    # with (measured within ~1 deg on real photos vs. VGGT). A floor RANSAC over
+    # the whole scene tilted the plaza 5 deg off it and, on the ruin's sloped
+    # lawn, picked a plane 1.2 m above the ground under the camera -- and the
+    # scale is camera_height / that height. So the floor is the ground around
+    # the camera: the strongest height band below it among the nearest points.
+    # Full gravity from Puffin's roll AND pitch (raw['up'] only has pitch: it
+    # is the turn axis the runs were generated about, kept as is).
+    from generation import puffin_runtime  # noqa: F401  (upstream on sys.path)
+    from generation.world_state import up_from_rp
+    cam = raw['cam']
+    up_unity = opencv_to_unity(up_from_rp(cam[0], cam[1])[None])[0]
+    normal = up_unity / np.linalg.norm(up_unity)
+    d, floor = -ground_height(pts, normal), 'gravity + ground near camera'
     try:
-        normal, d = fit_floor(pts, up_hint=up_unity)
-        floor = 'ransac'
+        n_ransac, _ = fit_floor(pts, up_hint=up_unity)
+        ransac_tilt = math.degrees(math.acos(np.clip(n_ransac @ normal, -1, 1)))
     except RuntimeError:
-        # No floor plane (e.g. open terrain): trust Puffin's gravity and put
-        # the floor at the 2nd percentile height.
-        normal = up_unity / np.linalg.norm(up_unity)
-        d = -float(np.percentile(pts @ normal, 2))
-        floor = 'gravity'
+        ransac_tilt = None
     pts, R, cam_height = level_to_floor(pts, normal, d)
     scale = args.camera_height / cam_height
     if scale <= 0:   # floor fitted above the camera: scaling would mirror the scene
@@ -253,13 +282,13 @@ def fuse_scene(args, out):
     write_ply(out / 'photo.ply', pts[:n_seed], rgb[:n_seed])
     write_ply(out / 'generated.ply', pts[n_seed:], rgb[n_seed:])
 
-    tilt = math.degrees(math.acos(np.clip(normal @ up_unity / np.linalg.norm(up_unity), -1, 1)))
+    tilt = 0.0 if ransac_tilt is None else ransac_tilt     # diagnostic: RANSAC floor vs gravity
     traj = {tag: [to_unity_pose(p, R, d, scale).tolist() for p in raw[f'{tag}_poses']]
             for tag in runs}
     meta = json.loads((out / 'meta.json').read_text())
     meta.update(
         points=int(len(pts)), floor_fit=floor,
-        floor_vs_gravity_deg=round(tilt, 2),
+        floor_vs_gravity_deg=round(tilt, 2),       # whole-scene RANSAC floor, diagnostic only
         estimated_camera_height=float(cam_height), scale_to_meters=float(scale),
         camera_height_m=args.camera_height,
         intrinsics_640=K.tolist(),

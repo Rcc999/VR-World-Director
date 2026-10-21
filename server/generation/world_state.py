@@ -158,6 +158,33 @@ def pf_frames(frames, rps, K, vfov, k1):
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
+CLOUD_SOURCES = {          # role -> files in the scene folder, concatenated
+    'single': dict(real=['photo.ply'], generated=['generated.ply']),
+    'multiseed': dict(real=['real_unity.ply'], generated=['generated.ply']),
+    'real': dict(real=['real_unity.ply']),
+}
+
+
+def export_clouds(scene, out, kind, voxel=0.02):
+    """Headset-sized clouds with fixed role names in world_state/clouds/
+    (full = real + generated), so world_state.json lists exactly what ships."""
+    from common.pointcloud import read_ply, write_ply
+    from generation.multiseed import voxel_merge
+    (out / 'clouds').mkdir(exist_ok=True)
+    parts, listed = {}, {}
+    for role, files in CLOUD_SOURCES[kind].items():
+        clouds = [read_ply(scene / f) for f in files]
+        parts[role] = (np.concatenate([c[0] for c in clouds]).astype(np.float64),
+                       np.concatenate([c[1] for c in clouds]))
+    parts['full'] = (np.concatenate([p[0] for p in parts.values()]),
+                     np.concatenate([p[1] for p in parts.values()]))
+    for role, (pts, rgb) in parts.items():
+        P, C = voxel_merge(pts, rgb, voxel)
+        write_ply(out / 'clouds' / f'{role}.ply', P, C)
+        listed[role] = dict(file=f'clouds/{role}.ply', points=int(len(P)), voxel_m=voxel)
+    return listed
+
+
 def export(scene, model=None, measure_every=7, media=True):
     from generation import puffin_runtime  # noqa: F401  (upstream on sys.path)
     from scripts.evaluation.modules import save_frames_as_mp4
@@ -165,6 +192,14 @@ def export(scene, model=None, measure_every=7, media=True):
     runs, (R, d, s), caption, kind = load_runs(scene)
     out = scene / 'world_state'
     out.mkdir(exist_ok=True)
+    # Measuring costs GPU time: carry earlier measurements over (they are
+    # camera-frame quantities, independent of the scene's leveling).
+    old = {}
+    if (out / 'world_state.json').exists():
+        prev = json.loads((out / 'world_state.json').read_text())
+        old = {(rn, v['index']): v['measured'] for rn, r in prev['runs'].items()
+               for v in r['views'] if 'measured' in v}
+        caption = caption or prev.get('caption')
     up_w = S @ R.T @ np.array([0.0, 1.0, 0.0])       # world up in the OpenCV fusion frame
     measure = model is not None
     if measure:
@@ -194,6 +229,11 @@ def export(scene, model=None, measure_every=7, media=True):
                 rps_cond.append((cr, cp))
             else:
                 rps_cond.append((sr, sp))
+            ref_rp = view.get('conditioned', view['scene'])
+            if (name, t) in old and not measure:
+                view['measured'] = m = old[(name, t)]
+                err['gen' if run['generated'] else 'real'].append(
+                    (abs(m['roll'] - ref_rp['roll']), abs(m['pitch'] - ref_rp['pitch'])))
             if measure and t % measure_every == 0 and (t > 0 or not run['generated']):
                 text = puffin_runtime.image_to_text(model, Image.fromarray(frames[t]))
                 cap, (mr, mp, mv, _) = puffin_runtime.split_caption(text)
@@ -238,9 +278,7 @@ def export(scene, model=None, measure_every=7, media=True):
     state['physics_check'] = dict(
         generated=summary(err['gen'], 'conditioned (what Puffin was told)'),
         real=summary(err['real'], 'scene (VGGT-leveled real cameras)'))
-    clouds = [c for c in ('scene_unity.ply', 'photo.ply', 'generated.ply', 'real_unity.ply',
-                          'full.ply', 'full_2cm.ply', 'full_3cm.ply') if (scene / c).exists()]
-    state['clouds'] = clouds
+    state['clouds'] = export_clouds(scene, out, kind)
     (out / 'world_state.json').write_text(json.dumps(state, indent=1))
     pc = state['physics_check']
     print(f"{scene.name}: {kind}, {len(runs)} runs | physics check: "
