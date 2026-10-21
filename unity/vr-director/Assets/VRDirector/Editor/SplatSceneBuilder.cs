@@ -37,10 +37,43 @@ namespace VRDirector.Editor
             public float[] scale;
         }
 
-        [MenuItem("VR Director/Build Gaussian Splat Viewer Scene")]
-        public static void Build()
+        const string PuffinSplats = "../../server/outputs/puffin_splats";
+        const string PuffinAssets = "Assets/GaussianAssets/Puffin";
+
+        /// <summary>
+        /// One click for the Puffin worlds as Gaussians: every server/outputs/puffin_splats/&lt;Name&gt;.ply
+        /// (from points_to_gaussians.py) → GaussianSplatAsset (Low quality, like the room) in
+        /// Assets/GaussianAssets/Puffin → scene Scenes/Puffin/Puffin-&lt;Name&gt;.unity.
+        /// </summary>
+        [MenuItem("VR Director/Build Puffin Splat Worlds")]
+        public static void BuildPuffinSplats()
         {
-            var asset = Selection.activeObject as GaussianSplatAsset;
+            var plys = Directory.Exists(PuffinSplats) ? Directory.GetFiles(PuffinSplats, "*.ply") : new string[0];
+            if (plys.Length == 0)
+            {
+                EditorUtility.DisplayDialog("VR Director", $"No .ply in {Path.GetFullPath(PuffinSplats)}.\n\n" +
+                    "Run server/splat_gaussians/points_to_gaussians.py first.", "OK");
+                return;
+            }
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
+            Directory.CreateDirectory(PuffinAssets);
+            foreach (string ply in plys.OrderBy(p => p))
+            {
+                string name = Path.GetFileNameWithoutExtension(ply);
+                string json = Path.ChangeExtension(ply, ".transform.json");
+                if (File.Exists(json)) File.Copy(json, $"{PuffinAssets}/{name}.transform.json", true);
+                AssetDatabase.Refresh();
+                var asset = GaussianSplatting.Editor.GaussianSplatAssetCreator.CreateLowQuality(Path.GetFullPath(ply), PuffinAssets);
+                if (asset == null) { Debug.LogError($"[VR Director] No asset made from {ply}"); continue; }
+                Build(asset);
+            }
+        }
+
+        [MenuItem("VR Director/Build Gaussian Splat Viewer Scene")]
+        public static void Build() => Build(Selection.activeObject as GaussianSplatAsset);
+
+        static void Build(GaussianSplatAsset asset)
+        {
             if (asset == null)
             {
                 EditorUtility.DisplayDialog("VR Director",
@@ -55,6 +88,7 @@ namespace VRDirector.Editor
 
             ConfigureProject();
 
+            string scenePath = ScenePathFor(asset);
             var scene = PointCloudSceneBuilder.OpenViewerTemplate();
             var go = new GameObject(asset.name + " (Gaussian Splat)");
             SceneManager.MoveGameObjectToScene(go, scene);
@@ -72,11 +106,23 @@ namespace VRDirector.Editor
             gs.m_CSSplatUtilities = Load<ComputeShader>("Shaders/SplatUtilities.compute");
             CameraToolsBuilder.MarkAsScene(go);
 
-            PointCloudSceneBuilder.SaveAsOnlyBuildScene(scene, ViewerScene);
+            Directory.CreateDirectory(Path.GetDirectoryName(scenePath));
+            EditorSceneManager.SaveScene(scene, scenePath);
+            PointCloudSceneBuilder.EnableWorldScenes(); // room first, then the Puffin worlds
             Selection.activeGameObject = go;
-            Debug.Log($"[VR Director] {ViewerScene} built with {AssetDatabase.GetAssetPath(asset)} " +
-                      $"({asset.splatCount} splats); it is now the only scene enabled for builds.");
+            Debug.Log($"[VR Director] {scenePath} built with {AssetDatabase.GetAssetPath(asset)} " +
+                      $"({asset.splatCount} splats).");
         }
+
+        /// <summary>
+        /// Assets under a "Puffin" folder (e.g. GaussianAssets/Puffin/Indoor) become the
+        /// Puffin world Scenes/Puffin/Puffin-&lt;name&gt;.unity (replacing its point version,
+        /// same scene name so its cameras and shots stay); anything else is the room.
+        /// </summary>
+        static string ScenePathFor(GaussianSplatAsset asset) =>
+            AssetDatabase.GetAssetPath(asset).Contains("/Puffin/")
+                ? $"Assets/Scenes/Puffin/Puffin-{asset.name}.unity"
+                : ViewerScene;
 
         static T Load<T>(string relativePath) where T : UnityEngine.Object
         {

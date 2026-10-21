@@ -66,6 +66,26 @@ namespace GaussianSplatting.Editor
             window.Show();
         }
 
+        // VR Director patch: create an asset from code (Low quality, like the room), no window.
+        public static GaussianSplatAsset CreateLowQuality(string inputPly, string outputFolder)
+        {
+            var c = CreateInstance<GaussianSplatAssetCreator>();
+            try
+            {
+                c.m_InputFile = inputPly;
+                c.m_OutputFolder = outputFolder;
+                c.m_ImportCameras = false;
+                c.m_Quality = DataQuality.Low;
+                c.ApplyQualityLevel();
+                c.CreateAsset();
+                if (!string.IsNullOrEmpty(c.m_ErrorMessage))
+                    Debug.LogError($"[VR Director] {inputPly}: {c.m_ErrorMessage}");
+                return AssetDatabase.LoadAssetAtPath<GaussianSplatAsset>(
+                    $"{outputFolder}/{Path.GetFileNameWithoutExtension(inputPly)}.asset");
+            }
+            finally { DestroyImmediate(c); }
+        }
+
         void Awake()
         {
             m_Quality = (DataQuality)EditorPrefs.GetInt(kPrefQuality, (int)DataQuality.Medium);

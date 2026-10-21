@@ -13,6 +13,7 @@ a large NVIDIA GPU that we do not have yet, so for now we test the rest of the p
 | Depth | 1 photo | Works, but you only see the ~57° the photo covers | `server/depth/` |
 | Splat as points | ~1 min of video | Full 360° room, but looks pixelated (opaque squares) | `server/splat_points/` |
 | **Splat as Gaussians** | ~1 min of video | **Full 360° room, realistic** | `server/splat_gaussians/` |
+| **Puffin-World** | 1 photo or a text prompt | 3 worlds (indoor, plaza, ruin), ±105° + a walk. Best so far: **textured depth meshes** + a 360° dome (sharp from the start spot; holes and smears when you walk away). Next: runs with sideways motion + depth-guided 3DGS | run on Euler (`server/README.md`, *Puffin-World worlds*) |
 
 The two splat approaches share capture → camera poses (COLMAP) → training (Brush):
 `server/splat_train/`.
@@ -27,7 +28,7 @@ Works on the Galaxy XR with hands only (no controllers):
    live preview of its view on its back; aim and pinch to place it. Cameras are numbered 1, 2, 3…
    and joined by a smooth path. Pinch a camera to move or rotate it; it never rolls, so the
    horizon stays level.
-3. **Save** the cameras (`camera_path.json` on the headset, reloaded at start).
+3. **Save** the cameras (`camera_path_<scene>.json` on the headset, reloaded at start).
 4. **Generate**: pick *Speed* (Slow / Medium / Fast), then *Generate*. A hidden camera flies along
    the path and renders the splat into a new shot, named shot1, shot2… (1280×720, 30 fps PNGs +
    `shot.json` with every frame's
@@ -35,6 +36,7 @@ Works on the Galaxy XR with hands only (no controllers):
    your shots: *Watch* (screen), *Ride* (you move along the path), *Edit* (its cameras come back;
    Generate makes a new shot and keeps the old), *Rename*, *Delete*.
 5. **Get the video**: plug in the headset and run `server/shots/pull_shot.sh [name]` → MP4 on the Mac.
+6. **Worlds**: switch between the 3DGS room and the Puffin worlds; each keeps its own cameras and shots.
 
 With the 3DGS room, "generate" means *rendering* the existing scene along the path. Later, the same
 path (`shot.json`) is what a world model like Puffin-World would take to generate new views.
