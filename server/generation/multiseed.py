@@ -32,6 +32,7 @@ import numpy as np
 SERVER_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVER_DIR))
 RES = 640
+MIN_SEED_CORR = 0.85     # Puffin vs VGGT depth of the seed view, below = drop the run
 
 
 def parse_args():
@@ -116,8 +117,50 @@ def generate(args, scene, v, cam):
     torch.cuda.empty_cache()
 
 
-def fuse(scene, v, cam):
+def carve(pts, v, conf_pct=50.0, margin=0.15):
+    """Real geometry wins wherever a real photo saw: drop generated points
+    (VGGT world, OpenCV) that disagree by more than `margin` with any photo's
+    confident depth at their pixel, in front of it (floating in space the
+    photo saw through) or behind it (offset copies of walls). Generated
+    points survive where no photo looked, or where they agree with one.
+    Generated turns drift toward their edges, and with ~30 of them
+    overlapping, removing only the points in front left most ghost walls."""
+    keep = np.ones(len(pts), bool)
+    H, W = v['depth'].shape[1:]
+    for i in range(len(v['names'])):
+        depth = v['depth'][i].astype(np.float32)
+        conf = v['conf'][i].astype(np.float32)
+        ok = conf > np.percentile(conf, conf_pct)
+        c2w, K = v['c2w'][i], v['K'][i]
+        cam = (pts - c2w[:3, 3]) @ c2w[:3, :3]            # world -> camera
+        z = cam[:, 2]
+        front = z > 1e-3
+        u = np.full(len(pts), -1)
+        w = np.full(len(pts), -1)
+        u[front] = np.round(K[0, 0] * cam[front, 0] / z[front] + K[0, 2] - 0.5).astype(int)
+        w[front] = np.round(K[1, 1] * cam[front, 1] / z[front] + K[1, 2] - 0.5).astype(int)
+        inside = front & (u >= 0) & (u < W) & (w >= 0) & (w < H)
+        idx = np.flatnonzero(inside)
+        seen = ok[w[idx], u[idx]]
+        idx = idx[seen]
+        rel = z[idx] / depth[w[idx], u[idx]]
+        keep[idx[np.abs(rel - 1) > margin]] = False
+    return keep
 
+
+def voxel_merge(pts, rgb, size):
+    """Average points (and colors) per size-meter cell."""
+    key = np.floor(pts / size).astype(np.int64)
+    _, inv, cnt = np.unique(key, axis=0, return_inverse=True, return_counts=True)
+    inv = inv.ravel()
+    P = np.zeros((len(cnt), 3))
+    C = np.zeros((len(cnt), 3))
+    np.add.at(P, inv, pts)
+    np.add.at(C, inv, rgb.astype(np.float64))
+    return P / cnt[:, None], (C / cnt[:, None]).round().astype(np.uint8)
+
+
+def fuse(scene, v, cam):
     from PIL import Image
     from generation import scenes
     from common.pointcloud import opencv_to_unity, read_ply, write_ply
@@ -139,6 +182,12 @@ def fuse(scene, v, cam):
         for side in ('left', 'right'):
             dep = g[f'{side}_depths'].astype(np.float32)
             ok = (ref > 0) & (dep[0] > 0)
+            corr = float(np.corrcoef(dep[0][ok], ref[ok])[0, 1])
+            if corr < MIN_SEED_CORR:
+                # Puffin's depth of the seed itself disagrees with VGGT's
+                # (IMG_7016 right: 0.03), so the whole run is misplaced.
+                print(f"  {f.stem} {side:5s}: skipped, seed depth correlation {corr:.2f} with VGGT")
+                continue
             s = float(np.median(ref[ok] / dep[0][ok]))      # Puffin units -> VGGT units
             dep = dep * s
             # Generated views only (from view 1): the photo itself is in the real cloud.
@@ -146,20 +195,29 @@ def fuse(scene, v, cam):
                                        g['K'], scene / 'seeds' / f'{f.stem}-{side}.glb')
             c2w = v['c2w'][i]
             pts = pts @ c2w[:3, :3].T + c2w[:3, 3]           # seed camera -> VGGT world
+            n_raw = len(pts)
+            keep = carve(pts, v)
+            pts, rgb = pts[keep], rgb[keep]
             u = opencv_to_unity(pts) @ R.T
             u[:, 1] += d0
             pts_all.append(u * s_m)
             rgb_all.append(rgb)
-            report.append((f.stem, side, s, len(pts)))
+            report.append((f.stem, side, s, len(pts), 1 - len(pts) / max(n_raw, 1)))
     if not pts_all:
         raise SystemExit('no generated seeds in ' + str(scene / 'seeds'))
     gen_pts, gen_rgb = np.concatenate(pts_all), np.concatenate(rgb_all)
     write_ply(scene / 'generated.ply', gen_pts, gen_rgb)
     real_pts, real_rgb = read_ply(scene / 'real_unity.ply')
-    write_ply(scene / 'full.ply', np.concatenate([real_pts, gen_pts]),
-              np.concatenate([real_rgb, gen_rgb]))
-    for stem, side, s, n in report:
-        print(f"  {stem} {side:5s}: depth scale x{s:.3f} to VGGT, {n} points")
+    full_pts = np.concatenate([real_pts, gen_pts]).astype(np.float64)
+    full_rgb = np.concatenate([real_rgb, gen_rgb])
+    write_ply(scene / 'full.ply', full_pts, full_rgb)
+    for size in (0.02, 0.03):      # headset-sized versions
+        P, C = voxel_merge(full_pts, full_rgb, size)
+        write_ply(scene / f'full_{round(size * 100)}cm.ply', P, C)
+        print(f"full_{round(size * 100)}cm.ply: {len(P):,} points")
+    for stem, side, s, n, carved in report:
+        print(f"  {stem} {side:5s}: depth scale x{s:.3f} to VGGT, {n} points kept, "
+              f"{carved:.0%} carved as free space")
     lo, hi = np.percentile(gen_pts, [1, 99], axis=0)
     print(f"generated {len(gen_pts)} points from {len(report) // 2} photos, extent "
           f"{np.round(hi - lo, 1)} m | full.ply = {len(real_pts)} real + {len(gen_pts)} generated")
