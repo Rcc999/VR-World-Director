@@ -241,6 +241,8 @@ def fuse_scene(args, out):
         floor = 'gravity'
     pts, R, cam_height = level_to_floor(pts, normal, d)
     scale = args.camera_height / cam_height
+    if scale <= 0:   # floor fitted above the camera: scaling would mirror the scene
+        raise SystemExit(f'floor fit put the seed camera below the floor (height {cam_height:.3f})')
     pts *= scale
     write_ply(out / 'scene_unity.ply', pts, rgb)
 
