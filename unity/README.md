@@ -59,7 +59,8 @@ version of `Scenes/Puffin/Puffin-<Name>.unity` (same scene name, so its cameras 
 **Puffin worlds as textured meshes (sharpest):** `server/puffin_fusion/depth_mesh.py --out
 Assets/Meshes/Puffin/<Name>Mesh` (see `server/README.md`), then *VR Director → Build Puffin Mesh
 Worlds*: one scene per folder, `Scenes/Puffin/Puffin-<Name>Mesh.unity`, each view unlit with its
-image (Puffin's pixels already hold the lighting) and drawn from both sides. The headset, preview
+image (Puffin's pixels already hold the lighting) and drawn from both sides. Indoor, Plaza and Ruin are in git (LFS, ~380 MB): open
+`Scenes/Puffin/Puffin-<Name>Mesh.unity` directly. The headset, preview
 and shot cameras draw up to 1000 m, so the 150 m sky and the dome are not cut off.
 
 Both menus set the build to **all worlds**: the 3DGS room first (opens at start), then the Puffin

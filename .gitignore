@@ -42,8 +42,9 @@ unity/vr-director/Assets/PointClouds/Puffin/
 unity/vr-director/Assets/PointClouds/Puffin.meta
 unity/vr-director/Assets/GaussianAssets/Puffin/
 unity/vr-director/Assets/GaussianAssets/Puffin.meta
-unity/vr-director/Assets/Scenes/Puffin/
-unity/vr-director/Assets/Scenes/Puffin.meta
-unity/vr-director/Assets/Meshes/Puffin/
-unity/vr-director/Assets/Meshes/Puffin.meta
-unity/vr-director/Assets/Meshes.meta
+unity/vr-director/Assets/Scenes/Puffin/*
+!unity/vr-director/Assets/Scenes/Puffin/Puffin-*Mesh.unity
+!unity/vr-director/Assets/Scenes/Puffin/Puffin-*Mesh.unity.meta
+# Mesh worlds are in git (LFS) except the 4x-texture duplicate
+unity/vr-director/Assets/Meshes/Puffin/PlazaMeshHD/
+unity/vr-director/Assets/Meshes/Puffin/PlazaMeshHD.meta
